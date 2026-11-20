@@ -1,0 +1,46 @@
+# Unity and editor generated files
+/Library/
+/Temp/
+/Obj/
+/obj/
+/Logs/
+/UserSettings/
+/.vs/
+/.vscode/
+*.csproj
+*.sln
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.tmp
+
+# Generated builds and local trial recordings
+/BUIL_TEST/
+/Dev_Build_4/
+/MOBBO_small_board/
+/build_5/
+/mobbo_24thm/
+/mobbo_63/
+/mobbo_6th_M/
+/mobbo_build/
+/mobbo_final_/
+/mobbo_pt_f_build/
+/new_build_dev_3/
+/Trial_data/
+/Assets/data/
+/Assets/data.meta
+/build requirements/Data/
+/Trial_*_Data_*.csv
+/Trial_*_Data_*.ldt
+/godot_mobbo/.godot/
+*.apk
+*.unitypackage
+*.private
+*.private.meta
+.DS_Store
+Thumbs.db

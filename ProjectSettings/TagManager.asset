@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 2
+  tags:
+  - Logic
+  - HeartSystem
+  - loginpopup
+  - signuppopup
+  - y_left
+  - x_up
+  - player2
+  - target
+  - y_right
+  - x_down
+  - player1
+  - Middle
+  - TopPipe
+  - BottomPipe
+  - coin
+  - Bird
+  - Gold
+  - Silver
+  - title
+  - r_border
+  - l_boder
+  - top_border
+  - ground_border
+  - tilt_board
+  - ball
+  - logic_object
+  - bird
+  - pipe_
+  - p_s
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - 
+  - Water
+  - UI
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Default
+    uniqueID: 0
+    locked: 0
