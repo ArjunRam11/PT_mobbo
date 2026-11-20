@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://blql88bo62w2s"
+
+[deps]
+
+files=["res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation"]
+
+source_file="res://Trial_1_Data_2026-11-20T16-16-42.csv"
+dest_files=["res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

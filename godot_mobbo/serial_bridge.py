@@ -8,17 +8,24 @@ import serial
 from serial.tools import list_ports
 
 HOST, PORT = "127.0.0.1", 23051
-BAUD = 57600
+BAUD = 115200  # matches Serial.begin(115200) in s_mobbo.ino
 
 
 def parse_packet(line):
+    # s_mobbo.ino sends "adc1,adc2,adc3,adc4,boardno\r\n" -- 4 signed 24-bit
+    # raw ADC readings plus a self-identifying board number (0 = left board,
+    # 1 = right board, see the Boardno constant in the firmware).
     parts = line.decode("ascii").strip().split(",")
-    if len(parts) != 4:
-        raise ValueError("expected four values")
-    values = [int(part) for part in parts]
-    if any(value < -8388608 or value > 8388607 for value in values):
+    if len(parts) != 5:
+        raise ValueError("expected four ADC values plus a board number")
+    adc = [int(part) for part in parts[:4]]
+    if any(value < -8388608 or value > 8388607 for value in adc):
         raise ValueError("ADC value out of range")
-    return values
+    boardno = int(parts[4])
+    if boardno not in (0, 1):
+        raise ValueError("boardno must be 0 (left) or 1 (right)")
+    side = "left" if boardno == 0 else "right"
+    return side, adc
 
 
 def serve_client(client):
@@ -41,19 +48,22 @@ def serve_client(client):
                 pass
         ports.clear()
 
-    def read_board(side, port):
+    def read_board(label, port):
+        # `label` (the port device name) is only used for error messages --
+        # which physical board ("left"/"right") a line belongs to is read
+        # from its own boardno field, not from which port it arrived on.
         while not stop.is_set() and port.is_open:
             try:
                 line = port.readline()
                 if line and line.endswith(b"\n"):
                     try:
-                        values = parse_packet(line)
+                        side, adc = parse_packet(line)
                     except (ValueError, UnicodeDecodeError):
                         continue
-                    send({"type": "data", "side": side, "values": values})
+                    send({"type": "data", "side": side, "adc": adc})
             except (serial.SerialException, OSError, TypeError) as exc:
                 if port.is_open:
-                    send({"type": "error", "message": f"{side} board: {exc}"})
+                    send({"type": "error", "message": f"{label}: {exc}"})
                 break
 
     try:
@@ -68,20 +78,20 @@ def serve_client(client):
                         disconnect()
                         send({"type": "status", "message": "Boards disconnected."})
                     elif command == "connect":
-                        left, right = request.get("left"), request.get("right")
+                        port_a, port_b = request.get("left"), request.get("right")
                         available = {p.device for p in list_ports.comports()}
-                        if not left or not right or left == right or left not in available or right not in available:
+                        if not port_a or not port_b or port_a == port_b or port_a not in available or port_b not in available:
                             raise ValueError("Select two different available serial ports.")
                         disconnect()
                         try:
-                            ports["left"] = serial.Serial(left, BAUD, timeout=0.2)
-                            ports["right"] = serial.Serial(right, BAUD, timeout=0.2)
+                            ports["a"] = serial.Serial(port_a, BAUD, timeout=0.2)
+                            ports["b"] = serial.Serial(port_b, BAUD, timeout=0.2)
                         except (serial.SerialException, OSError):
                             disconnect()
                             raise
-                        for side, port in ports.items():
-                            threading.Thread(target=read_board, args=(side, port), daemon=True).start()
-                        send({"type": "status", "message": f"Connected: left {left}, right {right}. Waiting for data."})
+                        for label, port in ports.items():
+                            threading.Thread(target=read_board, args=(label, port), daemon=True).start()
+                        send({"type": "status", "message": f"Connected: {port_a}, {port_b}. Waiting for data."})
                 except (ValueError, TypeError, serial.SerialException, OSError) as exc:
                     send({"type": "error", "message": str(exc)})
     finally:

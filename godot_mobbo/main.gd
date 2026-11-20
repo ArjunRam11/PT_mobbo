@@ -1,114 +1,119 @@
 extends Control
+## Board Diagnostics screen. All live-data plumbing (the TCP connection to
+## serial_bridge.py, latest raw ADC per board) lives in the SerialLink
+## autoload now, shared by every scene -- this screen just displays it and
+## lets the operator pick/connect the two serial ports.
 
-var tcp := StreamPeerTCP.new()
-var buffer := ""
 var left: OptionButton
 var right: OptionButton
 var status: Label
 var left_data: Label
 var right_data: Label
-var connected := false
+var combined_data: Label
 
 func _ready() -> void:
+    theme = UiTheme.theme
+    var bg := ColorRect.new()
+    bg.color = UiTheme.COLOR_BACKGROUND
+    bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    add_child(bg)
+
+    var margin := MarginContainer.new()
+    margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    for side in ["left", "right", "top", "bottom"]:
+        margin.add_theme_constant_override("margin_%s" % side, 24)
+    add_child(margin)
+
     var panel := VBoxContainer.new()
-    panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    panel.add_theme_constant_override("separation", 14)
-    add_child(panel)
-    var heading := Label.new()
-    heading.text = "MoBBo — two-board serial monitor"
-    heading.add_theme_font_size_override("font_size", 26)
-    panel.add_child(heading)
-    status = Label.new()
-    status.text = "Connecting to local serial bridge..."
+    panel.add_theme_constant_override("separation", 16)
+    margin.add_child(panel)
+
+    panel.add_child(UiTheme.make_heading("Board Diagnostics"))
+    status = UiTheme.make_muted_label("Connecting to local serial bridge...")
     panel.add_child(status)
+
     var row := HBoxContainer.new()
+    row.add_theme_constant_override("separation", 12)
     panel.add_child(row)
     left = OptionButton.new()
+    left.custom_minimum_size = UiTheme.MIN_TOUCH_SIZE
     right = OptionButton.new()
-    row.add_child(_label("Left board: "))
+    right.custom_minimum_size = UiTheme.MIN_TOUCH_SIZE
+    row.add_child(UiTheme.make_field_label("Board A port"))
     row.add_child(left)
-    row.add_child(_label("   Right board: "))
+    row.add_child(UiTheme.make_field_label("Board B port"))
     row.add_child(right)
-    var refresh := Button.new()
-    refresh.text = "Refresh ports"
-    refresh.pressed.connect(func(): _send({"cmd":"ports"}))
-    row.add_child(refresh)
-    var connect_button := Button.new()
-    connect_button.text = "Connect boards"
+
+    var action_row := HBoxContainer.new()
+    action_row.add_theme_constant_override("separation", 12)
+    panel.add_child(action_row)
+    var refresh := UiTheme.make_primary_button("Refresh ports")
+    refresh.pressed.connect(func(): SerialLink.request_ports())
+    action_row.add_child(refresh)
+    var connect_button := UiTheme.make_accent_button("Connect boards")
     connect_button.pressed.connect(_connect_boards)
-    row.add_child(connect_button)
-    var disconnect_button := Button.new()
-    disconnect_button.text = "Disconnect"
-    disconnect_button.pressed.connect(func(): _send({"cmd":"disconnect"}))
-    row.add_child(disconnect_button)
-    left_data = _label("Left: waiting for data")
-    right_data = _label("Right: waiting for data")
+    action_row.add_child(connect_button)
+    var disconnect_button := UiTheme.make_destructive_button("Disconnect")
+    disconnect_button.pressed.connect(func(): SerialLink.disconnect_boards())
+    action_row.add_child(disconnect_button)
+
+    left_data = UiTheme.make_subheading("Left board: waiting for data")
+    right_data = UiTheme.make_subheading("Right board: waiting for data")
+    combined_data = UiTheme.make_subheading("Combined COP: waiting for data")
     panel.add_child(left_data)
     panel.add_child(right_data)
-    panel.add_child(_label("Raw signed ADC values: sensor 1, 2, 3, 4. No calibration or tare is applied."))
-    tcp.connect_to_host("127.0.0.1", 23051)
+    panel.add_child(combined_data)
+    panel.add_child(UiTheme.make_field_label("Weight in kg, COP in cm. Board origin = each board's own center; combined COP uses the left board's center as origin."))
 
-func _label(value: String) -> Label:
-    var result := Label.new()
-    result.text = value
-    return result
+    var back := UiTheme.make_secondary_button("Back to Hub")
+    back.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/hub/hub.tscn"))
+    panel.add_child(back)
+
+    SerialLink.status_changed.connect(func(text): UiTheme.set_status(status, text, "neutral"))
+    SerialLink.error.connect(func(text): UiTheme.set_status(status, text, "error"))
+    SerialLink.ports_updated.connect(_on_ports_updated)
+    SerialLink.board_updated.connect(_on_board_updated)
+    if SerialLink.connected:
+        SerialLink.request_ports()
+    _refresh_readouts()
 
 func _connect_boards() -> void:
     if left.item_count == 0 or right.item_count == 0:
-        status.text = "Refresh and select two available ports."
+        UiTheme.set_status(status, "refresh and select two available ports.", "error")
         return
     var lp := left.get_item_text(left.selected)
     var rp := right.get_item_text(right.selected)
     if lp == rp:
-        status.text = "Choose different ports for left and right."
+        UiTheme.set_status(status, "choose different ports for Board A and Board B.", "error")
         return
-    _send({"cmd":"connect", "left":lp, "right":rp})
+    SerialLink.connect_boards(lp, rp)
 
-func _send(message: Dictionary) -> void:
-    if tcp.get_status() == StreamPeerTCP.STATUS_CONNECTED:
-        tcp.put_data((JSON.stringify(message) + "\n").to_utf8_buffer())
+func _on_ports_updated(ports: Array) -> void:
+    var old_left := left.get_item_text(left.selected) if left.selected >= 0 else ""
+    var old_right := right.get_item_text(right.selected) if right.selected >= 0 else ""
+    left.clear()
+    right.clear()
+    for port in ports:
+        left.add_item(port)
+        right.add_item(port)
+        if port == old_left: left.select(left.item_count - 1)
+        if port == old_right: right.select(right.item_count - 1)
+
+func _on_board_updated(_side: String) -> void:
+    _refresh_readouts()
+
+func _refresh_readouts() -> void:
+    left_data.text = _board_line("Left", SerialLink.left_forces()) if SerialLink.has_left_data() else "Left board: waiting for data"
+    right_data.text = _board_line("Right", SerialLink.right_forces()) if SerialLink.has_right_data() else "Right board: waiting for data"
+    if SerialLink.has_left_data() and SerialLink.has_right_data():
+        var cop = BoardData.combined_cop(SerialLink.left_forces(), SerialLink.right_forces())
+        combined_data.text = "Combined (left-board origin): COP = (%.1f, %.1f) cm" % [cop.x, cop.y] if cop != null else "Combined COP: no load"
     else:
-        status.text = "Bridge unavailable. Start serial_bridge.py and reopen this project."
+        combined_data.text = "Combined COP: waiting for data"
 
-func _process(_delta: float) -> void:
-    tcp.poll()
-    var state := tcp.get_status()
-    if state == StreamPeerTCP.STATUS_CONNECTED and not connected:
-        connected = true
-        status.text = "Bridge connected. Select two ports."
-        _send({"cmd":"ports"})
-    elif connected and state != StreamPeerTCP.STATUS_CONNECTED:
-        connected = false
-        status.text = "Bridge disconnected. Restart the bridge and reopen the project."
-    if state != StreamPeerTCP.STATUS_CONNECTED:
-        return
-    var available := tcp.get_available_bytes()
-    if available > 0:
-        var received := tcp.get_data(available)
-        if received[0] == OK:
-            buffer += received[1].get_string_from_utf8()
-    while buffer.contains("\n"):
-        var end := buffer.find("\n")
-        var line := buffer.substr(0, end)
-        buffer = buffer.substr(end + 1)
-        var msg = JSON.parse_string(line)
-        if msg is Dictionary:
-            _handle(msg)
-
-func _handle(msg: Dictionary) -> void:
-    match msg.get("type", ""):
-        "ports":
-            var old_left := left.get_item_text(left.selected) if left.selected >= 0 else ""
-            var old_right := right.get_item_text(right.selected) if right.selected >= 0 else ""
-            left.clear()
-            right.clear()
-            for port in msg.get("ports", []):
-                left.add_item(port)
-                right.add_item(port)
-                if port == old_left: left.select(left.item_count - 1)
-                if port == old_right: right.select(right.item_count - 1)
-        "status", "error":
-            status.text = str(msg.get("message", ""))
-        "data":
-            var target := left_data if msg.get("side") == "left" else right_data
-            target.text = str(msg.get("side", "")).capitalize() + ": " + str(msg.get("values", []))
+func _board_line(label: String, forces: Array) -> String:
+    var w: float = BoardData.total_weight(forces)
+    var cop = BoardData.board_cop(forces)
+    var cop_str := "no load" if cop == null else "(%.1f, %.1f) cm" % [cop.x, cop.y]
+    return "%s board: W = %.2f kg, COP = %s" % [label, w, cop_str]
