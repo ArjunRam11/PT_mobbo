@@ -29,7 +29,7 @@ var signup_amp_type: OptionButton
 
 func _ready() -> void:
 	theme = UiTheme.theme
-	var bg := ColorRect.new()
+	var bg := UiTheme.make_background()
 	bg.color = UiTheme.COLOR_BACKGROUND
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -41,7 +41,7 @@ func _ready() -> void:
 	root.add_theme_constant_override("separation", 20)
 	add_child(root)
 
-	root.add_child(UiTheme.make_heading("MoBBo"))
+	root.add_child(UiTheme.make_app_title())
 	root.add_child(UiTheme.make_muted_label("Balance-board rehab sessions"))
 
 	message_label = UiTheme.make_muted_label("")
@@ -70,7 +70,8 @@ func _ready() -> void:
 func _build_login_panel(root: VBoxContainer) -> void:
 	login_panel = PanelContainer.new()
 	login_panel.visible = false
-	login_panel.custom_minimum_size = Vector2(360, 0)
+	login_panel.custom_minimum_size = Vector2(420, 0)
+	login_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	root.add_child(login_panel)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)
@@ -101,7 +102,8 @@ func _build_login_panel(root: VBoxContainer) -> void:
 func _build_signup_panel(root: VBoxContainer) -> void:
 	signup_panel = PanelContainer.new()
 	signup_panel.visible = false
-	signup_panel.custom_minimum_size = Vector2(360, 0)
+	signup_panel.custom_minimum_size = Vector2(420, 0)
+	signup_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	root.add_child(signup_panel)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)

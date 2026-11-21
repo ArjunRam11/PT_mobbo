@@ -8,15 +8,17 @@ extends Node
 ## (+x = toward the right-hand side of that board, +y = front).
 ##
 ## Open questions / assumptions (confirm and update if wrong):
-## - GAIN/OFF below are the constants measured for the RIGHT board
-##   (Boardno=1, see s_mobbo/s_mobbo.ino). The LEFT board reuses the same
-##   values for now, per instruction, until it has its own calibration.
+## - Both boards currently use the supplied calibration measurements; each
+##   board can be given its own calibration through the override slots below.
 ## - RIGHT_BOARD_OFFSET assumes the right board sits directly beside the
 ##   left board along +x, edge-to-edge, with zero gap between them. If the
 ##   real rig has a gap or a different arrangement, change this constant.
 
-const GAIN := [1.0 / 72977.0, 1.0 / 75225.0, 1.0 / 72827.0, 1.0 / 71699.0]
-const OFF := [24.05 / 72977.0, 220.38 / 75225.0, 53569.0 / 72827.0, 503.92 / 71699.0]
+## Supplied zero ADC and signed slope in counts/kg for load cells 1–4.
+const ZERO_ADC := [-753740.63, 51659.20, 703002.81, -222166.91]
+const SLOPE := [-61959.52, -60519.76, -41301.70, -57799.64]
+const GAIN := [1.0 / SLOPE[0], 1.0 / SLOPE[1], 1.0 / SLOPE[2], 1.0 / SLOPE[3]]
+const OFF := [ZERO_ADC[0] / SLOPE[0], ZERO_ADC[1] / SLOPE[1], ZERO_ADC[2] / SLOPE[2], ZERO_ADC[3] / SLOPE[3]]
 
 ## Board half-dimensions, cm.
 const L_HALF := 56.2 / 2.0  # left-right half-span
@@ -41,6 +43,9 @@ var left_gain: Array = []
 var left_off: Array = []
 var right_gain: Array = []
 var right_off: Array = []
+## Session tare is the mean unloaded ADC reading for each sensor.
+var left_tare_adc: Array = []
+var right_tare_adc: Array = []
 
 func _gain_for(side: String) -> Array:
 	var g: Array = left_gain if side == "left" else right_gain
@@ -54,9 +59,11 @@ func _off_for(side: String) -> Array:
 func forces_from_raw(raw_adc: Array, side: String = "right") -> Array:
 	var gain := _gain_for(side)
 	var off := _off_for(side)
+	var tare: Array = left_tare_adc if side == "left" else right_tare_adc
 	var forces := []
 	for i in range(4):
-		forces.append(raw_adc[i] * gain[i] - off[i])
+		# Subtracting the force at tare cancels the calibration intercept.
+		forces.append((raw_adc[i] - tare[i]) * gain[i] if tare.size() == 4 else raw_adc[i] * gain[i] - off[i])
 	return forces
 
 func total_weight(forces: Array) -> float:

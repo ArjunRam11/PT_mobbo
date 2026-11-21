@@ -2,7 +2,6 @@
 import json
 import socket
 import threading
-import time
 
 import serial
 from serial.tools import list_ports
@@ -52,15 +51,23 @@ def serve_client(client):
         # `label` (the port device name) is only used for error messages --
         # which physical board ("left"/"right") a line belongs to is read
         # from its own boardno field, not from which port it arrived on.
+        pending = bytearray()
         while not stop.is_set() and port.is_open:
             try:
-                line = port.readline()
-                if line and line.endswith(b"\n"):
+                chunk = port.read_until(b"\n", 256)
+                if chunk:
+                    pending.extend(chunk)
+                if pending.endswith(b"\n"):
+                    line = bytes(pending)
+                    pending.clear()
                     try:
                         side, adc = parse_packet(line)
                     except (ValueError, UnicodeDecodeError):
                         continue
                     send({"type": "data", "side": side, "adc": adc})
+                elif len(pending) >= 256:
+                    # A valid packet is much shorter; discard malformed input.
+                    pending.clear()
             except (serial.SerialException, OSError, TypeError) as exc:
                 if port.is_open:
                     send({"type": "error", "message": f"{label}: {exc}"})
@@ -89,8 +96,8 @@ def serve_client(client):
                         except (serial.SerialException, OSError):
                             disconnect()
                             raise
-                        for label, port in ports.items():
-                            threading.Thread(target=read_board, args=(label, port), daemon=True).start()
+                        for port in ports.values():
+                            threading.Thread(target=read_board, args=(port.port, port), daemon=True).start()
                         send({"type": "status", "message": f"Connected: {port_a}, {port_b}. Waiting for data."})
                 except (ValueError, TypeError, serial.SerialException, OSError) as exc:
                     send({"type": "error", "message": str(exc)})
@@ -107,7 +114,10 @@ def main():
         print(f"Serial bridge listening on {HOST}:{PORT}", flush=True)
         while True:
             client, _ = server.accept()
-            serve_client(client)
+            try:
+                serve_client(client)
+            except (ConnectionError, OSError) as exc:
+                print(f"Client disconnected: {exc}", flush=True)
 
 
 if __name__ == "__main__":

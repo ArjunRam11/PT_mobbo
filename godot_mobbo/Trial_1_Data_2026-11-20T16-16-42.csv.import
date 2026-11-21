@@ -6,14 +6,12 @@ uid="uid://blql88bo62w2s"
 
 [deps]
 
-files=["res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation"]
+files=["res://Trial_1_Data_2026-11-20T16-16-42.bird.translation", "res://Trial_1_Data_2026-11-20T16-16-42.bird.translation", "res://Trial_1_Data_2026-11-20T16-16-42.Gamelevel.translation", "res://Trial_1_Data_2026-11-20T16-16-42.pipe.translation", "res://Trial_1_Data_2026-11-20T16-16-42.pipespeed.translation", "res://Trial_1_Data_2026-11-20T16-16-42.heightOffsetpipe.translation", "res://Trial_1_Data_2026-11-20T16-16-42.score.translation"]
 
 source_file="res://Trial_1_Data_2026-11-20T16-16-42.csv"
-dest_files=["res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation", "res://Trial_1_Data_2026-11-20T16-16-42.en.translation"]
+dest_files=["res://Trial_1_Data_2026-11-20T16-16-42.bird.translation", "res://Trial_1_Data_2026-11-20T16-16-42.bird.translation", "res://Trial_1_Data_2026-11-20T16-16-42.Gamelevel.translation", "res://Trial_1_Data_2026-11-20T16-16-42.pipe.translation", "res://Trial_1_Data_2026-11-20T16-16-42.pipespeed.translation", "res://Trial_1_Data_2026-11-20T16-16-42.heightOffsetpipe.translation", "res://Trial_1_Data_2026-11-20T16-16-42.score.translation"]
 
 [params]
 
 compress=1
 delimiter=0
-unescape_keys=false
-unescape_translations=true

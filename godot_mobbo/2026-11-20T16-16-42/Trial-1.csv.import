@@ -15,5 +15,3 @@ dest_files=["res://2026-11-20T16-16-42/Trial-1.systime.translation", "res://2026
 
 compress=1
 delimiter=0
-unescape_keys=false
-unescape_translations=true

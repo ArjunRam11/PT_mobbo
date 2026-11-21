@@ -17,17 +17,20 @@ const GAME_ENTRIES := [
 	{"label": "Coin Collector", "scene": "res://scenes/coin_collector/coin_collector.tscn"},
 	{"label": "Stepper", "scene": ""},
 	{"label": "Weight Shifting", "scene": "res://scenes/weight_shifting/weight_shifting.tscn"},
-	{"label": "Force Display", "scene": "res://scenes/force_display/force_display.tscn"},
 	{"label": "Sit Assessment", "scene": "res://scenes/assessment/assessment.tscn"},
+	# Unity's sensory_assess.cs was an empty stub -- nothing to port yet.
+	{"label": "Sensory Integration Test", "scene": ""},
 	{"label": "Board Setup / Test", "scene": ""},
 	{"label": "User Info", "scene": ""},
 ]
 
 var patient_label: Label
+var connection_label: Label
+var auto_button: Button
 
 func _ready() -> void:
 	theme = UiTheme.theme
-	var bg := ColorRect.new()
+	var bg := UiTheme.make_background()
 	bg.color = UiTheme.COLOR_BACKGROUND
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -44,33 +47,46 @@ func _ready() -> void:
 	root.add_theme_constant_override("separation", 20)
 	margin.add_child(root)
 
-	root.add_child(UiTheme.make_heading("MoBBo"))
+	root.add_child(UiTheme.make_app_title())
 
-	patient_label = UiTheme.make_subheading(
+	patient_label = UiTheme.make_muted_label(
 		"Patient: %s" % (SessionPaths.hosp_num if SessionPaths.hosp_num != "" else "(none)")
 	)
 	root.add_child(patient_label)
 
+	connection_label = UiTheme.make_muted_label(_connection_text())
+	connection_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root.add_child(connection_label)
+
 	var grid := GridContainer.new()
 	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 16)
-	grid.add_theme_constant_override("v_separation", 16)
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	root.add_child(grid)
 	for entry in GAME_ENTRIES:
 		var btn: Button
 		if entry.scene == "":
-			btn = UiTheme.make_secondary_button("%s (soon)" % entry.label)
+			# Greyed out = coming soon (tooltip says so); no "(soon)" suffix so
+			# the long names don't widen every column.
+			btn = UiTheme.make_secondary_button(entry.label)
 			btn.disabled = true
-			btn.tooltip_text = "Not ported to Godot yet."
+			btn.tooltip_text = "Coming soon."
 		else:
 			btn = UiTheme.make_primary_button(entry.label)
 			btn.pressed.connect(func(): get_tree().change_scene_to_file(entry.scene))
+		btn.custom_minimum_size = Vector2(230, UiTheme.MIN_TOUCH_SIZE.y)
+		btn.size_flags_horizontal = Control.SIZE_FILL
 		grid.add_child(btn)
 
 	var utility_row := HBoxContainer.new()
 	utility_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	utility_row.add_theme_constant_override("separation", 16)
 	root.add_child(utility_row)
+
+	auto_button = UiTheme.make_accent_button("Auto connect")
+	auto_button.pressed.connect(_on_auto_connect_pressed)
+	utility_row.add_child(auto_button)
 
 	var monitor_btn := UiTheme.make_secondary_button("Board Diagnostics")
 	monitor_btn.pressed.connect(func(): get_tree().change_scene_to_file(BOARD_MONITOR_SCENE))
@@ -79,6 +95,25 @@ func _ready() -> void:
 	var logout_btn := UiTheme.make_destructive_button("Logout")
 	logout_btn.pressed.connect(_logout)
 	utility_row.add_child(logout_btn)
+
+	SerialLink.status_changed.connect(func(t): UiTheme.set_status(connection_label, t, "neutral"))
+	SerialLink.error.connect(func(t): UiTheme.set_status(connection_label, t, "error"))
+	SerialLink.auto_connect_finished.connect(func(_ok, _l, _r):
+		auto_button.disabled = false
+		auto_button.text = "Auto connect")
+
+func _connection_text() -> String:
+	if SerialLink.left_port != "" or SerialLink.right_port != "":
+		return "Left board: %s   ·   Right board: %s" % [
+			SerialLink.left_port if SerialLink.left_port != "" else "not found",
+			SerialLink.right_port if SerialLink.right_port != "" else "not found",
+		]
+	return "Boards not connected. Press Auto connect."
+
+func _on_auto_connect_pressed() -> void:
+	auto_button.disabled = true
+	auto_button.text = "Scanning..."
+	SerialLink.auto_connect()
 
 func _logout() -> void:
 	AppData.stop_session()

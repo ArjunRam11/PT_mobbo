@@ -34,14 +34,17 @@ The build's only registered scene is `Assets/wifi mobbo/scene/login_mobbo.unity`
 (`Assets/Scenes/SampleScene.unity` is an unused default template scene). `com.unity.test-framework`
 is a listed package dependency but no test assemblies exist in `Assets/`.
 
-For the Godot app (`godot_mobbo/`): install Godot 4 (4.5, `gl_compatibility` renderer) and Python 3,
-`py -m pip install pyserial`, flash both boards with `s_mobbo/s_mobbo.ino`, run `py serial_bridge.py`
-from `godot_mobbo/`, then open `project.godot` in Godot. The serial monitor's original setup steps
+For the Godot app (`godot_mobbo/`): install Godot 4 (4.5, `gl_compatibility` renderer), flash both
+boards with `s_mobbo/s_mobbo.ino` (left = `Boardno "0"`, right = `"1"`), then open `project.godot`.
+Serial is read **directly in Godot via the gdserial GDExtension** (`addons/gdserial`, v0.3.4) — no
+Python. `serial_bridge.py`/`start_serial_bridge.bat` are obsolete. LC1's SCK is on D3 = GPIO0,
+which stock gdserial clamps low via DTR on Windows (LC1 reads 0); see
+`addons/gdserial/MOBBO_PATCH.md` for the patched DLL or the D3→D4 rewire. The serial monitor's original setup steps
 are in `godot_mobbo/README.md`, but that file predates the login/hub scenes below and is stale on
 scope — treat this CLAUDE.md section as current.
 
 For the firmware: flash `s_mobbo.ino` to an ESP8266 (NodeMCU 1.0) via the Arduino IDE/CLI; close
-any serial monitor before the Python bridge connects to the port.
+any serial monitor before Godot opens the port.
 
 ## Unity project architecture
 
@@ -101,11 +104,14 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
 
 **Done:**
 - **Data pipeline, over serial (not WiFi/UDP — a deliberate pivot from the Unity app's transport):**
-  `serial_bridge.py` relays both boards' serial lines over local TCP (`127.0.0.1:23051`), tagging
-  each line's side (`left`/`right`) from the firmware's own `boardno` field rather than from which
-  port the user picked. **`scripts/core/serial_link.gd` (autoload `SerialLink`) owns the one TCP
-  connection to that bridge and the latest raw ADC per board** — every scene reads this shared
-  autoload instead of each managing its own socket, mirroring how Unity's `AppData_WIFI.Start()`/
+  **`scripts/core/serial_link.gd` (autoload `SerialLink`) opens both boards' COM ports directly with
+  gdserial's `GdSerialManager` (RAW mode, lines assembled in GDScript) and owns the latest raw ADC
+  per board.** Each line's side (`left`/`right`) comes from the firmware's own `boardno` field; if
+  both boards report the same boardno it falls back to port order (Board A = left).
+  `SerialLink.auto_connect()` (the "Auto connect" button on the hub, Sit Assessment and Board
+  Diagnostics) opens every USB COM port, listens up to 2.5 s, keeps the ports reporting boardno
+  0/1, closes the rest, and emits `auto_connect_finished(ok, left_port, right_port)`. Every scene
+  reads this shared autoload instead of each managing its own port, mirroring how Unity's `AppData_WIFI.Start()`/
   `MoBBoServer` run once and every game scene just polls the resulting statics each frame.
   `scripts/core/board_data.gd` (autoload `BoardData`) turns raw ADC readings into per-sensor force
   (`Force_i = raw_adc_i * gain_i - off_i`, calibration constants measured for the right board; left
@@ -146,10 +152,14 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   front-back board pair, which this left/right rig doesn't have, so it isn't physically meaningful
   here. Lean-detection thresholds are this port's own (geometry-based), not copied from Unity's
   `COP.x < 55`/`> 60` — those were tuned to Unity's different multi-board coordinate frame.
-- **Force Display scene** (`scenes/force_display/`) — port of `force.cs`'s core role (see live
+- **Force display, merged into the Sit Assessment scene** (`scenes/assessment/`; the separate
+  `scenes/force_display/` scene was removed) — port of `force.cs`'s core role (see live
   per-sensor force and COP at a glance), built on `scripts/ui/board_view.gd` (`class_name
   BoardView`, a reusable to-scale `_draw()`-based visualization of one board: corner dot/text size
-  scaled by force, like Unity's font-size-by-force, plus a COP marker). Not ported: Unity's
+  scaled by force, like Unity's font-size-by-force, plus a COP marker). `DualBoardView` puts two
+  `BoardView`s side by side, sized to fill the card, and draws the combined COP in mango yellow
+  over them; per-board (red) and combined COPs are only drawn above `COP_MIN_WEIGHT` (1 kg).
+  `WeightBarChart` is the vertical left/right/total weight bar chart. Not ported: Unity's
   draw-a-rectangle-from-typed-dimensions overlay and per-corner `MeshRenderer` color tinting —
   cosmetic extras on the same underlying data, not the data itself.
 - **Four minigames**, all weight/COP-controlled via `BoardData`/`SerialLink`, all built in code on
@@ -185,11 +195,18 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
     row per assessment, not an intended "baseline" design. Falls back to `BoardData`'s physical
     combined-COP range if no assessment has been recorded yet.
 - **Shared UI theme** (`scripts/ui/ui_theme.gd`, autoload `UiTheme`) — one Theme built in code
-  (not a hand-authored `.tres`), used by every scene above. Palette/sizing follow the
-  accessibility-focused "accessible-and-ethical" style (7:1 text contrast target, 44px+ touch
-  targets, visible 3px focus rings, no body text under 16px) rather than the softer neumorphism a
-  first design-system pass suggested, since this app's real users include clinicians and patients
-  in a clinical setting. Includes a themed `ProgressBar` and `UiTheme.set_status(label, message,
+  (not a hand-authored `.tres`), used by every scene above. Style is "RGB on black" (user's
+  choice, 2026-11-21): near-black background, dark hairline-bordered cards, white text, grey
+  captions, green = primary/eyebrow labels, red = destructive/errors, blue = secondary accent;
+  compact 34px buttons; fonts Space Grotesk (headings, `make_eyebrow()` green letter-spaced
+  section labels) and Inter (body) bundled in `fonts/` as variable fonts — weights are set via
+  `FontVariation.variation_opentype` keyed by the **int** tag from `name_to_tag("wght")` (a String
+  key is silently ignored). Mango yellow (`COLOR_YELLOW`) marks highlights: live values/totals
+  (`make_value_label()`), combined COP, focus ring. Games will get their own UI/music later.
+  Starts fullscreen (F11 toggles, handled in `UiTheme`); base size 1280x720 with
+  `canvas_items`/`expand` stretch, so every scene scales to fill the screen — lay scenes out
+  with anchors/containers, never hard-coded pixel sizes.
+  Includes a themed `ProgressBar` and `UiTheme.set_status(label, message,
   "error"|"success"|"neutral")` — the one shared status-message convention (color never carries
   meaning alone; text is also prefixed "Error:"/"Success:"). Scenes build their UI in code (no
   hand-authored `.tscn` node trees beyond a bare root `Control`) and should keep using `UiTheme`'s
@@ -219,10 +236,10 @@ sanity-check scripts/scenes headlessly:
 "not found" on a fresh clone, run once with `--headless --editor --quit --path .` first to force
 Godot to build its global script-class cache, then re-run the above.
 
-Without real boards attached, the data pipeline (`SerialLink`'s TCP protocol through `BoardData`'s
-calibration/COP math) can still be verified end-to-end with a throwaway Python script standing in
-for `serial_bridge.py`: open a TCP server on `127.0.0.1:23051` and stream fixed
-`{"type":"data","side":"left"/"right","adc":[...]}` lines with a known ADC value, then compare
+Without real boards attached, the data pipeline (`SerialLink`'s line parser through `BoardData`'s
+calibration/COP math) can still be verified with a headless `-s` script that fakes entries in
+`SerialLink._ports` and feeds `SerialLink._consume(port, "a,b,c,d,boardno\r\n".to_ascii_buffer())`
+with known ADC values (autoloads are reached via `root.get_node("SerialLink")` there), then compare
 `BoardData`'s computed force/COP against a hand-calculated expected value (e.g. `print()` from a
 scene's `_process()` once `SerialLink.has_left_data()`/`has_right_data()` are true, read via
 `--headless ... --quit-after N`). This caught 3 real bugs during initial development and is the

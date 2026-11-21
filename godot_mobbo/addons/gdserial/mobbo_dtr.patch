@@ -1,0 +1,61 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 5029f8a..9ef839a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -296,8 +296,12 @@ impl GdSerialManager {
+             _ => BufferingMode::Raw, // mode 0 and invalid values (default to Raw)
+         };
+ 
++        // MoBBo patch: open with DTR deasserted. On ESP8266/ESP32 dev boards the
++        // USB-UART auto-program circuit pulls GPIO0 low when DTR is asserted
++        // without RTS, which the stock open() did on Windows.
+         let builder = serialport::new(&port_name_str, baud_rate as u32)
+-            .timeout(Duration::from_millis(timeout_ms as u64));
++            .timeout(Duration::from_millis(timeout_ms as u64))
++            .dtr_on_open(false);
+ 
+         match builder.open() {
+             Ok(port) => {
+@@ -374,6 +378,42 @@ impl GdSerialManager {
+         }
+     }
+ 
++    /// MoBBo patch: drive the DTR line of an open port.
++    #[func]
++    pub fn set_dtr(&self, port_name: GString, level: bool) -> bool {
++        let Some(port_arc) = self.ports.lock().ok().and_then(|m| m.get(&port_name.to_string()).cloned()) else {
++            godot_error!("Port not open: {}", port_name);
++            return false;
++        };
++        let result = match port_arc.lock() {
++            Ok(mut port) => port.write_data_terminal_ready(level),
++            Err(_) => return false,
++        };
++        if let Err(e) = result {
++            godot_error!("Failed to set DTR on {}: {}", port_name, e);
++            return false;
++        }
++        true
++    }
++
++    /// MoBBo patch: drive the RTS line of an open port.
++    #[func]
++    pub fn set_rts(&self, port_name: GString, level: bool) -> bool {
++        let Some(port_arc) = self.ports.lock().ok().and_then(|m| m.get(&port_name.to_string()).cloned()) else {
++            godot_error!("Port not open: {}", port_name);
++            return false;
++        };
++        let result = match port_arc.lock() {
++            Ok(mut port) => port.write_request_to_send(level),
++            Err(_) => return false,
++        };
++        if let Err(e) = result {
++            godot_error!("Failed to set RTS on {}: {}", port_name, e);
++            return false;
++        }
++        true
++    }
++
+     /// Set custom delimiter for a port using mode 2 (CustomDelimiter)
+     #[func]
+     pub fn set_delimiter(&mut self, port_name: GString, delimiter: i32) -> bool {

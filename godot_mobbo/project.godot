@@ -16,7 +16,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="MoBBo Two Boards"
 run/main_scene="res://scenes/login/login.tscn"
-config/features=PackedStringArray("4.6")
+config/features=PackedStringArray("4.5")
 
 [autoload]
 
@@ -29,8 +29,15 @@ SerialLink="*res://scripts/core/serial_link.gd"
 
 [display]
 
-window/size/viewport_width=900
-window/size/viewport_height=600
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/mode=3
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdserial/plugin.cfg")
 
 [rendering]
 

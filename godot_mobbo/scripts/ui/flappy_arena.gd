@@ -23,8 +23,8 @@ func _draw() -> void:
 		var x: float = pipe.x
 		var gap_top: float = pipe.gap_center_y - pipe.gap_half
 		var gap_bottom: float = pipe.gap_center_y + pipe.gap_half
-		draw_rect(Rect2(Vector2(x - PIPE_WIDTH * 0.5, 0), Vector2(PIPE_WIDTH, gap_top)), UiTheme.COLOR_MUTED_TEXT, true)
-		draw_rect(Rect2(Vector2(x - PIPE_WIDTH * 0.5, gap_bottom), Vector2(PIPE_WIDTH, size.y - gap_bottom)), UiTheme.COLOR_MUTED_TEXT, true)
+		draw_rect(Rect2(Vector2(x - PIPE_WIDTH * 0.5, 0), Vector2(PIPE_WIDTH, gap_top)), UiTheme.COLOR_PRIMARY_PRESSED, true)
+		draw_rect(Rect2(Vector2(x - PIPE_WIDTH * 0.5, gap_bottom), Vector2(PIPE_WIDTH, size.y - gap_bottom)), UiTheme.COLOR_PRIMARY_PRESSED, true)
 
 	var bird_x := size.x * 0.25
 	draw_circle(Vector2(bird_x, bird_y), BIRD_RADIUS, UiTheme.COLOR_ACCENT)

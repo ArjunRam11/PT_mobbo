@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://or420cyqwy6d"
+
+[deps]
+
+files=["res://2026-11-20T16-20-54/Trial-1.systime.translation", "res://2026-11-20T16-20-54/Trial-1.devtime.translation", "res://2026-11-20T16-20-54/Trial-1.f1.translation", "res://2026-11-20T16-20-54/Trial-1.f2.translation", "res://2026-11-20T16-20-54/Trial-1.f3.translation", "res://2026-11-20T16-20-54/Trial-1.f4.translation", "res://2026-11-20T16-20-54/Trial-1.x.translation", "res://2026-11-20T16-20-54/Trial-1.y.translation", "res://2026-11-20T16-20-54/Trial-1.F.translation", "res://2026-11-20T16-20-54/Trial-1.annotation.translation"]
+
+source_file="res://2026-11-20T16-20-54/Trial-1.csv"
+dest_files=["res://2026-11-20T16-20-54/Trial-1.systime.translation", "res://2026-11-20T16-20-54/Trial-1.devtime.translation", "res://2026-11-20T16-20-54/Trial-1.f1.translation", "res://2026-11-20T16-20-54/Trial-1.f2.translation", "res://2026-11-20T16-20-54/Trial-1.f3.translation", "res://2026-11-20T16-20-54/Trial-1.f4.translation", "res://2026-11-20T16-20-54/Trial-1.x.translation", "res://2026-11-20T16-20-54/Trial-1.y.translation", "res://2026-11-20T16-20-54/Trial-1.F.translation", "res://2026-11-20T16-20-54/Trial-1.annotation.translation"]
+
+[params]
+
+compress=true
+delimiter=0

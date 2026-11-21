@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://ctqhlii3padua"
+
+[deps]
+
+files=["res://Trial_1_Data_2026-11-20T16-20-54.bird.translation", "res://Trial_1_Data_2026-11-20T16-20-54.bird.translation", "res://Trial_1_Data_2026-11-20T16-20-54.Gamelevel.translation", "res://Trial_1_Data_2026-11-20T16-20-54.pipe.translation", "res://Trial_1_Data_2026-11-20T16-20-54.pipespeed.translation", "res://Trial_1_Data_2026-11-20T16-20-54.heightOffsetpipe.translation", "res://Trial_1_Data_2026-11-20T16-20-54.score.translation"]
+
+source_file="res://Trial_1_Data_2026-11-20T16-20-54.csv"
+dest_files=["res://Trial_1_Data_2026-11-20T16-20-54.bird.translation", "res://Trial_1_Data_2026-11-20T16-20-54.bird.translation", "res://Trial_1_Data_2026-11-20T16-20-54.Gamelevel.translation", "res://Trial_1_Data_2026-11-20T16-20-54.pipe.translation", "res://Trial_1_Data_2026-11-20T16-20-54.pipespeed.translation", "res://Trial_1_Data_2026-11-20T16-20-54.heightOffsetpipe.translation", "res://Trial_1_Data_2026-11-20T16-20-54.score.translation"]
+
+[params]
+
+compress=true
+delimiter=0

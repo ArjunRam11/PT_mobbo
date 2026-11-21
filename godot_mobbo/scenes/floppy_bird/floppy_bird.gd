@@ -53,7 +53,7 @@ func _ready() -> void:
 		DirAccess.make_dir_recursive_absolute(SessionPaths.floppybird_gamedata)
 
 	theme = UiTheme.theme
-	var bg := ColorRect.new()
+	var bg := UiTheme.make_background()
 	bg.color = UiTheme.COLOR_BACKGROUND
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
