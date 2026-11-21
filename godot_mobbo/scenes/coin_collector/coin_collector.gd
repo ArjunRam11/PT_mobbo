@@ -45,49 +45,30 @@ func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
 
-	theme = UiTheme.theme
-	var bg := UiTheme.make_background()
-	bg.color = UiTheme.COLOR_BACKGROUND
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	var hud := GameHud.build(self, "Coin Collector", "Shift weight left/right to catch coins. Avoid the bombs.", "music_coin")
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 24)
-	add_child(margin)
-
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 14)
-	margin.add_child(root)
-
-	root.add_child(UiTheme.make_heading("Coin Collector"))
-	root.add_child(UiTheme.make_muted_label("Shift weight left/right to catch coins. Avoid the red bombs."))
-
-	score_label = UiTheme.make_subheading("Score: 0")
-	root.add_child(score_label)
+	var score_chip := HudChip.create("Score: 0", "coin")
+	score_label = score_chip.label
+	hud.chips.add_child(score_chip)
 
 	arena = CoinArena.new()
 	arena.custom_minimum_size = ARENA_SIZE
 	arena.size_flags_vertical = Control.SIZE_EXPAND_FILL  # fill the screen
-	root.add_child(arena)
+	hud.arena_slot.add_child(arena)
 
-	status_label = UiTheme.make_subheading("")
-	root.add_child(status_label)
+	status_label = GameHud.make_status_label()
+	hud.status.add_child(status_label)
 
-	var button_row := HBoxContainer.new()
-	button_row.add_theme_constant_override("separation", 12)
-	root.add_child(button_row)
 	start_button = UiTheme.make_accent_button("Start Game")
 	start_button.pressed.connect(_on_start_pressed)
-	button_row.add_child(start_button)
+	hud.buttons.add_child(start_button)
 	var back := UiTheme.make_secondary_button("Back to Hub")
 	back.pressed.connect(func(): get_tree().change_scene_to_file(HUB_SCENE))
-	button_row.add_child(back)
+	hud.buttons.add_child(back)
 
 	collector_x = _area().x * 0.5
 	arena.set_state(collector_x, items)
+	arena.show_banner("Coin Collector", "Press Start Game")
 	set_process(true)
 
 func _on_start_pressed() -> void:
@@ -102,6 +83,8 @@ func _on_start_pressed() -> void:
 	recorder.start("coin_collector", "coin_rawdata", "coin_gamedata", GAME_DATA_HEADER, trial_count)
 	game_active = true
 	start_button.text = "Restart"
+	arena.hide_banner()
+	Sfx.play("start")
 
 func _process(delta: float) -> void:
 	var limits := SessionPaths.get_ml_limits()
@@ -123,39 +106,59 @@ func _process(delta: float) -> void:
 			_spawn_timer = 0.0
 			_spawn_item()
 
-		var collector_y := _area().y - 18.0
+		var collector_y := _area().y - CoinArena.COLLECTOR_BOTTOM
+		var rim_y := collector_y - CoinArena.COLLECTOR_SIZE.y * 0.5
 		var i := items.size() - 1
 		while i >= 0:
 			var item = items[i]
+			var old_y: float = item.pos.y
 			var new_pos: Vector2 = item.pos + Vector2(0, FALL_SPEED * delta)
 			item.pos = new_pos
-			var caught: bool = abs(new_pos.x - collector_x) <= CoinArena.COLLECTOR_SIZE.x * 0.5 and new_pos.y >= collector_y - CoinArena.COLLECTOR_SIZE.y * 0.5
+			# Caught only on the frame the item's bottom crosses the basket rim
+			# while over the basket (edge-on counts by half a radius). Before,
+			# anything already below the rim was caught too, so an item that
+			# had fallen past could still be scooped up by sliding under it.
+			var r := CoinArena.ITEM_RADIUS
+			var crossed_rim: bool = old_y + r < rim_y and new_pos.y + r >= rim_y
+			var over_basket: bool = abs(new_pos.x - collector_x) <= CoinArena.COLLECTOR_SIZE.x * 0.5 + r * 0.5
+			var caught: bool = crossed_rim and over_basket
 			if caught:
 				if item.is_bomb:
 					_record("bomb")
+					arena.fx_bomb(new_pos)
 					_game_over()
 					break  # _game_over() cleared items; nothing left to update
 				else:
 					score += 1
 					score_label.text = "Score: %d" % score
 					_record("coin")
+					arena.fx_catch(new_pos)
 				items.remove_at(i)
 			elif item.pos.y > _area().y:
 				items.remove_at(i)
 			i -= 1
 
+	arena.recording = game_active
 	arena.set_state(collector_x, items)
 
 func _spawn_item() -> void:
 	var is_bomb := randf() * 100.0 <= BOMB_CHANCE * 100.0
 	items.append({"pos": Vector2(randf_range(10, _area().x - 10), 0.0), "is_bomb": is_bomb})
 	_record("spawn_bomb" if is_bomb else "spawn_coin")
+	if is_bomb:
+		Sfx.play("fuse", -6.0)  # audible warning: a bomb is coming
 
 func _game_over() -> void:
 	game_active = false
 	items.clear()
 	UiTheme.set_status(status_label, "you hit a bomb. Final score: %d. Data saved." % score, "error")
 	recorder.stop("finished, score %d" % score)
+	arena.show_banner("Game over", "Final score %d  -  press Restart" % score, _badge_for(score, 3, 8, 15))
+	Sfx.play("game_over")
+
+## Cosmetic medal for the end banner: bronze/silver/gold at these scores.
+func _badge_for(value: int, bronze: int, silver: int, gold: int) -> String:
+	return "gold" if value >= gold else ("silver" if value >= silver else ("bronze" if value >= bronze else ""))
 
 ## The arena's real on-screen size (it stretches to fill the window);
 ## ARENA_SIZE is only its minimum / pre-layout fallback.

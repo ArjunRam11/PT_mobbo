@@ -16,11 +16,13 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="MoBBo Two Boards"
 run/main_scene="res://scenes/login/login.tscn"
-config/features=PackedStringArray("4.5")
+config/features=PackedStringArray("4.6")
+config/icon="res://sprites/logo/app_icon.png"
 
 [autoload]
 
 UiTheme="*res://scripts/ui/ui_theme.gd"
+Sfx="*res://scripts/ui/sfx.gd"
 SessionPaths="*res://scripts/core/session_paths.gd"
 AppConfig="*res://scripts/core/app_config.gd"
 AppData="*res://scripts/core/app_data.gd"
