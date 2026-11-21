@@ -1,39 +1,59 @@
 class_name MoBBoDataLogger
 extends RefCounted
-## Port of MoBBoLibrary_WIFI.DataLogger: accumulates CSV text in memory and
-## flushes it to disk once, on stop, rather than writing every line.
+## CSV logger that streams to disk. Unity's DataLogger kept the whole file in
+## memory and wrote it once on stop, so a crash, a closed window or leaving
+## the screen mid-trial lost the entire trial. This opens the file at start,
+## writes every line straight away and flushes at least once a second, so at
+## most ~1 s of data can be lost even if the app is killed.
+
+const FLUSH_INTERVAL_MS := 1000
 
 var curr_fname: String
-var _filedata: String = ""
+var _file: FileAccess = null
+var _last_flush_ms := 0
+var _rows := 0
 
 var still_logging: bool:
-	get: return not _filedata.is_empty() or not curr_fname.is_empty()
+	get: return _file != null
 
+var rows_written: int:
+	get: return _rows
+
+## Creates the folder and file and writes the header. An existing file is
+## appended to (no second header).
 func _init(filename: String, header: String) -> void:
 	curr_fname = filename
-	_filedata = header
+	if filename.is_empty():
+		push_error("MoBBoDataLogger: empty file name, nothing will be logged.")
+		return
+	DirAccess.make_dir_recursive_absolute(filename.get_base_dir())
+	var exists := FileAccess.file_exists(filename)
+	_file = FileAccess.open(filename, FileAccess.READ_WRITE if exists else FileAccess.WRITE)
+	if _file == null:
+		push_error("MoBBoDataLogger: cannot open '%s' (%s)" % [filename, error_string(FileAccess.get_open_error())])
+		return
+	if exists:
+		_file.seek_end()
+	else:
+		_file.store_string(header if header.ends_with("\n") else header + "\n")
+	_file.flush()
+	_last_flush_ms = Time.get_ticks_msec()
 
+## data: one or more complete lines, each ending in "\n".
 func log_data(data: String) -> void:
-	_filedata += data
+	if _file == null:
+		return
+	_file.store_string(data)
+	_rows += 1
+	var now := Time.get_ticks_msec()
+	if now - _last_flush_ms >= FLUSH_INTERVAL_MS:
+		_file.flush()
+		_last_flush_ms = now
 
-func stop_data_log(write_to_disk: bool = true) -> void:
-	if write_to_disk:
-		if curr_fname.is_empty():
-			push_warning("MoBBoDataLogger: log file name is empty, skipping file write.")
-			return
-		var dir := curr_fname.get_base_dir()
-		if not dir.is_empty():
-			DirAccess.make_dir_recursive_absolute(dir)
-		var file: FileAccess
-		if FileAccess.file_exists(curr_fname):
-			file = FileAccess.open(curr_fname, FileAccess.READ_WRITE)
-			if file:
-				file.seek_end()
-		else:
-			file = FileAccess.open(curr_fname, FileAccess.WRITE)
-		if file == null:
-			push_error("MoBBoDataLogger: failed to write log file '%s'" % curr_fname)
-			return
-		file.store_string(_filedata)
-		file.close()
-	curr_fname = ""
+## Flushes and closes. (The argument is kept for older callers; data is
+## already on disk, so there is nothing to discard.)
+func stop_data_log(_write_to_disk: bool = true) -> void:
+	if _file != null:
+		_file.flush()
+		_file.close()
+		_file = null

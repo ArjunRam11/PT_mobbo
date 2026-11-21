@@ -151,6 +151,7 @@ func _handle_line(port: String, line: String) -> void:
 		right_received_ms = state.last_line_ms
 		right_port = port
 	_collect_tare(side, adc)
+	BoardData.log_packet(side, adc)  # raw log: one row per packet
 	board_updated.emit(side)
 
 ## LC1's SCK is on D3 = GPIO0, which the NodeMCU's USB auto-program circuit
@@ -306,7 +307,7 @@ func auto_connect() -> void:
 		# USB only: opening Bluetooth/virtual COM ports can stall for seconds.
 		if str(entry.get("port_type", "")).begins_with("USB"):
 			candidates.append(str(entry.get("port_name", "")))
-	candidates.sort()
+	candidates.sort_custom(func(a, b): return a.naturalnocasecmp_to(b) < 0)  # COM9 before COM11
 	if candidates.is_empty():
 		error.emit("Auto connect: no USB serial ports found. Plug in the boards.")
 		auto_connect_finished.emit(false, "", "")
@@ -371,7 +372,7 @@ func request_ports() -> void:
 	var info: Dictionary = _manager.list_ports()
 	for key in info:
 		names.append(str(info[key].get("port_name", "")))
-	names.sort()
+	names.sort_custom(func(a, b): return a.naturalnocasecmp_to(b) < 0)
 	ports_updated.emit(names)
 	if names.is_empty():
 		status_changed.emit("No serial ports found. Plug in the boards and press Refresh.")

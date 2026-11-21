@@ -32,8 +32,11 @@ var is_timer_running: bool:
 func start_timer() -> void:
 	_stopwatch_start_usec = Time.get_ticks_usec()
 
+## Used when a screen is opened without logging in: the data still goes to
+## a proper "guest" session folder (see SessionPaths.ensure_session()).
 func start_dummy_session() -> void:
 	start_session("000000g")
+	SessionPaths.ensure_session()
 
 func start_session(hosp_no: String) -> void:
 	subj_hosp_num = hosp_no
@@ -41,5 +44,11 @@ func start_session(hosp_no: String) -> void:
 	session = TherapySession.new(hosp_no)
 
 func stop_session() -> void:
+	BoardData.stop_trial_log()
+	SessionPaths.log_event("session ended")
 	if session != null:
 		session.close_session_file()
+	session = null
+	# Next login starts a fresh session folder.
+	SessionPaths.session_folder = ""
+	SessionPaths.hosp_num = ""

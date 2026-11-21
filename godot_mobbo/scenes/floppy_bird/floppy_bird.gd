@@ -2,15 +2,14 @@ extends Control
 ## Port of BirdScript.cs + PipeSpawnScript.cs/PipeMoveScript.cs/HeartSystem.cs.
 ## The bird's vertical position is driven by weight (board lean), not a
 ## flap/jump input: it tracks a moving-average-smoothed combined COP.y,
-## scaled across a narrow lean band read from the ML assessment CSV --
-## ported as-is from BirdScript.Update(), including its odd choice of
-## reusing the medial-lateral assessment's min_gcop_y (not an AP assessment)
-## as the vertical baseline. FootLength (15cm) and the smoothing window (10
-## samples) match the Unity constants.
+## scaled across the patient's anterior-posterior reach from the Sit
+## Assessment AP capture (min_max_dist_ap.csv), so their full forward/back
+## lean spans the full arena height. (Unity instead reused the ML
+## assessment's min_gcop_y plus a fixed 15 cm FootLength band.) The
+## smoothing window (10 samples) matches Unity.
 
 const HUB_SCENE := "res://scenes/hub/hub.tscn"
 const ARENA_SIZE := Vector2(560, 380)
-const FOOT_LENGTH := 15.0  # cm, matches BirdScript.FootLength
 const SMOOTH_WINDOW := 10
 const MAX_LEVEL := 10
 const MIN_LIVES := 5
@@ -42,15 +41,16 @@ var trial_active := false
 var trial_count := 0
 var trial_remaining := 0.0
 var _spawn_timer := 0.0
-var game_data: Array[String] = []
+## Unity's columns first; then lives, the smoothed AP COP and the reach
+## limits it was scaled across (cm), and the arena size in px.
+const GAME_DATA_HEADER := "Time,bird_x,bird_y,Gamelevel,pipe_spawnrate,pipespeed,heightOffsetpipe,score,lives,cop_y_cm,ap_back_cm,ap_front_cm,arena_w,arena_h\n"
+var recorder := GameRecorder.new()
 var _elapsed := 0.0
+var _next_row_s := 0.0
 
 func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
-	if not SessionPaths.floppybird_rawdata.is_empty():
-		DirAccess.make_dir_recursive_absolute(SessionPaths.floppybird_rawdata)
-		DirAccess.make_dir_recursive_absolute(SessionPaths.floppybird_gamedata)
 
 	theme = UiTheme.theme
 	var bg := UiTheme.make_background()
@@ -86,6 +86,7 @@ func _ready() -> void:
 
 	arena = FlappyArena.new()
 	arena.custom_minimum_size = ARENA_SIZE
+	arena.size_flags_vertical = Control.SIZE_EXPAND_FILL  # fill the screen
 	root.add_child(arena)
 
 	status_label = UiTheme.make_subheading("")
@@ -134,25 +135,25 @@ func _on_start_pressed() -> void:
 	lives_label.text = "Lives: %d" % lives
 	status_label.text = ""
 	pipes.clear()
-	game_data.clear()
 	_spawn_timer = 0.0
 	_elapsed = 0.0
+	_next_row_s = 0.0
 	trial_count += 1
-	trial_remaining = float(SessionPaths.trial_duration)
+	# Login sets the trial length; without login it would be 0 s.
+	trial_remaining = float(SessionPaths.trial_duration if SessionPaths.trial_duration > 0 else 60)
 	trial_active = true
 	start_button.text = "Restart"
+	recorder.start("floppybird", "floppybird_rawdata", "floppybird_gamedata", GAME_DATA_HEADER, trial_count)
 
-	var folder := SessionPaths.floppybird_rawdata.path_join(
-		"%s%s" % [SessionPaths.hosp_num, Time.get_datetime_string_from_system().replace(":", "-")]
-	)
-	DirAccess.make_dir_recursive_absolute(folder)
-	BoardData.start_trial_log(folder.path_join("Trial"), trial_count)
+func _exit_tree() -> void:
+	recorder.stop("left early" if trial_active else "finished")
 
 func _process(delta: float) -> void:
-	var limits := SessionPaths.get_ml_limits()
-	var baseline: float = limits.left  # port of BirdScript's min_gcop_y_ml reuse
-	var top_limit := baseline + FOOT_LENGTH * 0.5
-	var bottom_limit := baseline
+	# Patient's own anterior-posterior reach (Sit Assessment AP capture):
+	# leaning fully back = bottom of the arena, fully forward = top.
+	var limits := SessionPaths.get_ap_limits()
+	var top_limit: float = limits.front
+	var bottom_limit: float = limits.back
 
 	var cop = BoardData.combined_cop(SerialLink.left_forces(), SerialLink.right_forces())
 	var cop_y: float = 0.0 if cop == null else cop.y
@@ -167,18 +168,19 @@ func _process(delta: float) -> void:
 	var t := 0.0
 	if top_limit > bottom_limit:
 		t = clamp((avg_cop_y - bottom_limit) / (top_limit - bottom_limit), 0.0, 1.0)
-	bird_y = ARENA_SIZE.y * (1.0 - t)
+	var r := FlappyArena.BIRD_RADIUS
+	bird_y = r + (_area().y - 2.0 * r) * (1.0 - t)  # full lean = edge, bird stays inside
 
 	if trial_active:
 		trial_remaining = max(0.0, trial_remaining - delta)
 		timer_label.text = "Time: %d" % int(ceil(trial_remaining))
-		if BoardData.is_trial_logging:
-			BoardData.log_trial_frame(SerialLink.left_adc, SerialLink.right_adc)
 		_update_pipes(delta)
 		_elapsed += delta
-		if fmod(_elapsed, 0.1) < delta:
-			game_data.append("%.2f,%.1f,%.1f,%d,%.2f,%.1f,0,%d" % [
-				_elapsed, ARENA_SIZE.x * 0.25, bird_y, level, spawn_rate, pipe_speed, score
+		if _elapsed >= _next_row_s:  # 10 Hz game-state rows, as Unity did
+			_next_row_s += 0.1
+			recorder.row("%.2f,%.1f,%.1f,%d,%.2f,%.1f,0,%d,%d,%.3f,%.3f,%.3f,%.0f,%.0f" % [
+				_elapsed, _area().x * 0.25, bird_y, level, spawn_rate, pipe_speed, score,
+				lives, avg_cop_y, bottom_limit, top_limit, _area().x, _area().y
 			])
 		if trial_remaining <= 0.0:
 			_end_trial()
@@ -190,13 +192,13 @@ func _update_pipes(delta: float) -> void:
 	if _spawn_timer >= spawn_rate or pipes.is_empty():
 		_spawn_timer = 0.0
 		pipes.append({
-			"x": ARENA_SIZE.x + FlappyArena.PIPE_WIDTH,
-			"gap_center_y": randf_range(PIPE_GAP_HALF + 10, ARENA_SIZE.y - PIPE_GAP_HALF - 10),
+			"x": _area().x + FlappyArena.PIPE_WIDTH,
+			"gap_center_y": randf_range(PIPE_GAP_HALF + 10, _area().y - PIPE_GAP_HALF - 10),
 			"gap_half": PIPE_GAP_HALF,
 			"scored": false,
 		})
 
-	var bird_x := ARENA_SIZE.x * 0.25
+	var bird_x := _area().x * 0.25
 	var i := pipes.size() - 1
 	while i >= 0:
 		var pipe = pipes[i]
@@ -221,19 +223,11 @@ func _lose_life() -> void:
 
 func _end_trial() -> void:
 	trial_active = false
-	BoardData.stop_trial_log()
 	start_button.text = "Start Trial"
-	UiTheme.set_status(status_label, "trial ended. Score: %d" % score, "neutral")
-	_save_game_data()
+	UiTheme.set_status(status_label, "trial ended. Score: %d. Data saved." % score, "neutral")
+	recorder.stop("finished, score %d" % score)
 
-func _save_game_data() -> void:
-	var path := SessionPaths.floppybird_gamedata.path_join(
-		"Trial_%d_Data_%s.csv" % [trial_count, Time.get_datetime_string_from_system().replace(":", "-")]
-	)
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_line("Time,bird_x,bird_y,Gamelevel,pipe_spawnrate,pipespeed,heightOffsetpipe,score")
-	for row in game_data:
-		f.store_line(row)
-	f.close()
+## The arena's real on-screen size (it stretches to fill the window);
+## ARENA_SIZE is only its minimum / pre-layout fallback.
+func _area() -> Vector2:
+	return arena.size if arena != null and arena.size.x > 1.0 else ARENA_SIZE

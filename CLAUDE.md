@@ -119,10 +119,33 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   boards in a left-board-origin frame (`right_board_offset` encodes the boards' physical
   arrangement — currently an edge-to-edge, zero-gap assumption, not a measured value; fix it there
   if the real rig differs). `BoardData` also provides **per-trial raw logging**
-  (`start_trial_log`/`log_trial_frame`/`stop_trial_log`): rows accumulate in memory and flush once
-  at stop, the same pattern as Unity's `DataLogger`/`MoBBoDeviceUDP`, with a header shaped like
-  Unity's `MoBBoDeviceUDP.DataHeader` (`side,systime,devtime,f1,f2,f3,f4,x,y,F,annotation` — "ID"
-  became "side" since this rig is always exactly two boards, not N registered devices).
+  (`start_trial_log`/`stop_trial_log`; `SerialLink` calls `log_packet()` for **every packet**, not
+  per frame). Header = Unity's `MoBBoDeviceUDP.DataHeader` with "ID"→"side", then added columns
+  `gcop_x,gcop_y,W_total,adc1..adc4` (raw counts allow recalibration later).
+- **Data saving (2026-11-21 overhaul)** — all under `<Documents>/MoBBo_Data/data/` (override with
+  env var `MOBBO_DATA_DIR`; older builds' `user://data` is copied over once, never deleted):
+  `MOBBO_MASTERLIST.csv`, and `Trail_data/<hosp_no>/SessionD<time>/` holding `session_info.csv`
+  (who/when + calibration/geometry), `session_log.csv` (events; paths relative to the session),
+  `assessment/` (ML/AP reach CSVs, reach + timed-trial raw files), `Rawdata/<game>.rawdata/`,
+  `Gamedata/<game>.gamedata/`. Not logged in → a `guest` session (`SessionPaths.ensure_session()`),
+  never a relative path. `MoBBoDataLogger` **streams** (flush ≤1 s), so leaving a screen or a crash
+  keeps the data. Every game records through `GameRecorder` (start/row/stop; stop in `_exit_tree`
+  too). Game rows include `arena_w,arena_h` since px positions depend on screen size. Reach limits
+  for games come from the newest assessment of the patient, across sessions (cached; the
+  assessment calls `SessionPaths.invalidate_limits()` after saving).
+- **Analysis & report tab** (Sit Assessment header toggles Live / Analysis): `AnalysisView` lists the
+  patient's raw CSVs across sessions (+ Browse), `CopAnalysis` computes whole-file measures (mean/
+  median/SD of per-board + combined COP and forces, weight %, ML/AP range, path length, total/ML/AP
+  velocity, 95% ellipse via chi² 5.991), `CopPlot` draws rig + zoomed views, `CopReport` writes
+  `<file>_report.pdf` (vector, via the in-repo `PdfDoc` writer — Godot has no PDF export) and
+  `<file>_summary.csv` next to the data. COP is low-pass filtered (10 Hz 2nd-order Butterworth,
+  zero-phase) before all COP measures; forces/weight % unfiltered. Combined COP is sampled once per
+  left packet paired with the latest right packet. Verified against synthetic data with known
+  answers. Reads old-format raw files too (recomputes COP from f1..f4).
+- **Deploying to another PC**: `export_presets.cfg` (Windows Desktop → `../build/MoBBo.exe`, excludes
+  stray data files). Needs Godot 4.5.1 export templates installed. Ship the exe **with**
+  `gdserial.dll` next to it (export copies it). The DLL is built with a static C runtime so no
+  VC++ redistributable is needed; boards still need the USB-serial driver (CH340/CP210x).
   `main.tscn`/`main.gd` (the "Board Diagnostics" screen, off the hub) displays `SerialLink`'s live
   data via `BoardData`'s math instead of raw ADC dumps.
 - **Session/config foundation**: `scripts/core/app_data.gd` (autoload `AppData`, ~ `AppData_WIFI`'s
@@ -148,10 +171,12 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   medial-lateral (left/right) limits-of-stability reach capture
   (`find_Min_max_ML_reach`/`button_min_max_ml`/`write_csv_min_max_ml`, writing
   `min_max_dist_ml.csv` with the same header/columns as Unity) and timed-trial raw logging via
-  `BoardData`. **Not ported:** the anterior-posterior (front/back) reach variant — it assumes a
-  front-back board pair, which this left/right rig doesn't have, so it isn't physically meaningful
-  here. Lean-detection thresholds are this port's own (geometry-based), not copied from Unity's
-  `COP.x < 55`/`> 60` — those were tuned to Unity's different multi-board coordinate frame.
+  `BoardData`. Also an **anterior-posterior** (front/back) reach capture (user request, 2026-11-21)
+  writing `min_max_dist_ap.csv` (`min_gcop_x,min_gcop_y,min_weight,max_gcop_x,max_gcop_y,
+  max_weight,range_y`), read by `SessionPaths.get_ap_limits()`. Both captures are Start → lean
+  fully both ways → Stop & save: they keep the furthest combined COP reached while recording
+  (load > 2 kg). Unity's press-at-the-extreme flow with fixed lean thresholds was dropped — it kept
+  rejecting genuine leans on real hardware. Ranges under 2 cm aren't saved.
 - **Force display, merged into the Sit Assessment scene** (`scenes/assessment/`; the separate
   `scenes/force_display/` scene was removed) — port of `force.cs`'s core role (see live
   per-sensor force and COP at a glance), built on `scripts/ui/board_view.gd` (`class_name
@@ -184,10 +209,11 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
     so none was added here either.
   - **Floppy Bird** (`scenes/floppy_bird/`, `FlappyArena`) — port of `BirdScript.cs` +
     `PipeSpawnScript.cs`/`PipeMoveScript.cs`/`HeartSystem.cs`: the bird's vertical position tracks
-    a moving-average-smoothed combined COP.y (not a flap/jump input), scaled across a narrow
-    lean band read from the ML assessment CSV. Carried over as-is, including Unity's odd reuse of
-    the medial-lateral assessment's `min_gcop_y` as the vertical baseline for what is otherwise an
-    anterior-posterior-feeling mechanic — that's Unity's actual behavior, not a porting mistake.
+    a moving-average-smoothed combined COP.y (not a flap/jump input), scaled so the patient's AP
+    reach (`get_ap_limits()`) spans the full arena height. (Unity reused the ML CSV's `min_gcop_y`
+    plus a fixed 15 cm band; replaced at the user's request.)
+  - Game logic uses the arena's real on-screen size (`_area()`), not the `ARENA_SIZE` minimum, so
+    the patient's ML reach spans the full (fullscreen) arena width in Ping Pong / Coin Collector.
   - All four read reach limits via `SessionPaths.get_ml_limits()` (new), which parses
     `min_max_dist_ml.csv` the same way `BirdScript.cs`/`ping.cs`/`collector.cs` did, except it
     uses the **last** (most recent) row rather than Unity's **first** row — always reading the

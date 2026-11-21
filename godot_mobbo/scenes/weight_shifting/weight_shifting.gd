@@ -24,12 +24,33 @@ var ball_pos: Vector2 = Vector2.ZERO
 var ball_vel: Vector2 = Vector2.ZERO
 var level: int = 0
 
+## Recording (raw board data + 10 Hz game rows) runs between Start and Stop;
+## leaving the screen stops and saves it. Ball position is px from the
+## board centre; weights kg.
+const GAME_DATA_HEADER := "Time,level,left_w,right_w,tilt_deg,ball_x,ball_y,arena_w,arena_h\n"
+var record_button: Button
+var recorder := GameRecorder.new()
+var trial_count := 0
+var _rec_elapsed := 0.0
+var _next_row_s := 0.0
+
+func _on_record_pressed() -> void:
+	if recorder.active:
+		recorder.stop("finished")
+		record_button.text = "Start recording"
+		return
+	trial_count += 1
+	_rec_elapsed = 0.0
+	_next_row_s = 0.0
+	recorder.start("ball_roller", "ball_roller_rawdata", "ball_roller_gamedata", GAME_DATA_HEADER, trial_count)
+	record_button.text = "Stop & save"
+
+func _exit_tree() -> void:
+	recorder.stop("left screen")
+
 func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
-	if not SessionPaths.ball_roller_rawdata.is_empty():
-		DirAccess.make_dir_recursive_absolute(SessionPaths.ball_roller_rawdata)
-		DirAccess.make_dir_recursive_absolute(SessionPaths.ball_roller_gamedata)
 
 	theme = UiTheme.theme
 	var bg := UiTheme.make_background()
@@ -66,6 +87,9 @@ func _ready() -> void:
 	var level_row := HBoxContainer.new()
 	level_row.add_theme_constant_override("separation", 12)
 	root.add_child(level_row)
+	record_button = UiTheme.make_accent_button("Start recording")
+	record_button.pressed.connect(_on_record_pressed)
+	level_row.add_child(record_button)
 	var down_btn := UiTheme.make_secondary_button("Level Down")
 	down_btn.pressed.connect(_decrement_level)
 	level_row.add_child(down_btn)
@@ -111,3 +135,12 @@ func _process(delta: float) -> void:
 		ball_vel.y *= -0.4
 
 	arena.set_state(tilt_rad, ball_pos)
+
+	if recorder.active:
+		_rec_elapsed += delta
+		if _rec_elapsed >= _next_row_s:
+			_next_row_s += 0.1
+			recorder.row("%.2f,%d,%.3f,%.3f,%.2f,%.1f,%.1f,%.0f,%.0f" % [
+				_rec_elapsed, level, left_w, right_w, current_tilt_deg, ball_pos.x, ball_pos.y,
+				arena.size.x, arena.size.y
+			])

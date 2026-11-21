@@ -7,16 +7,11 @@ extends Control
 ## assessment from TestScene_handler.cs.
 ##
 ## Ported from TestScene_handler.cs: the medial-lateral (left/right) reach
-## capture -- find_Min_max_ML_reach / button_min_max_ml / write_csv_min_max_ml --
-## and the timed trial raw-data logging (assess_btnStrtStpLogging_Click /
-## StartLoggingProcess / TimedLogging). The anterior-posterior reach variant
-## was not ported: this rig is strictly two side-by-side boards, so AP reach
-## isn't physically meaningful here the way it was in Unity's NxM board grid.
-##
-## Lean-detection thresholds below are this port's own choice, not Unity's:
-## Unity's (COP.x < 55 / > 60) were tuned to its own multi-board grid frame.
-## These use board geometry instead (comfortably past the boards' shared
-## edge, well into each board's own half) -- confirm/tune against hardware.
+## capture (same min_max_dist_ml.csv layout as write_csv_min_max_ml) and the
+## timed trial raw-data logging. Added: an anterior-posterior (front/back)
+## reach capture writing min_max_dist_ap.csv, used by Floppy Bird. Both
+## captures record the furthest combined COP reached while recording,
+## instead of Unity's press-at-the-extreme with fixed lean thresholds.
 
 const HUB_SCENE := "res://scenes/hub/hub.tscn"
 ## A COP (per board or combined) is only drawn above this load, so sensor
@@ -30,12 +25,14 @@ const WEIGHT_DISPLAY_MIN := 0.5  # kg
 ## W_player1/W_player2 (this rig's left/right board weight) substituted in.
 const ML_CSV_HEADER := "min_x,min_%,min_left%,min_cop_x,min_cop_y,min_gcop_x,min_gcop_y,left_weight, max_x,max_right%,max_left%,max_cop_x,max_cop_y,max_gcop_x,max_gcop_y,right_weight\n"
 
-const NO_LOAD_WEIGHT := 2.0  # kg, matches Unity's ">2f" significant-load check
+## AP file is new (Unity had no AP capture for this rig). Combined-COP frame,
+## cm; y = front(+)/back(-). Floppy Bird reads min_gcop_y / max_gcop_y.
+const AP_CSV_HEADER := "min_gcop_x,min_gcop_y,min_weight,max_gcop_x,max_gcop_y,max_weight,range_y\n"
 
-## Set in _ready() -- these depend on BoardData.right_board_offset, which is
-## a var (an adjustable rig-arrangement assumption), not a compile-time const.
-var _lean_left_threshold_x: float
-var _lean_right_threshold_x: float
+const NO_LOAD_WEIGHT := 2.0  # kg, matches Unity's ">2f" significant-load check
+const MIN_REACH_RANGE := 2.0  # cm; a smaller range is almost certainly no lean at all
+const DEFAULT_TRIAL_SECONDS := 60
+var _reach_log_axis := ""  # which reach capture owns the current raw log
 
 # Connection
 var connection_label: Label
@@ -49,13 +46,8 @@ var combined_label: Label
 var weight_chart: WeightBarChart
 var total_label: Label
 
-# ML reach
-var ml_button: Button
-var ml_result_label: Label
-var got_min := false
-var got_max := false
-var min_row := ""
-var max_row := ""
+# Reach capture, per axis ("ml", "ap"): active, min/max snapshots, widgets.
+var _reach := {}
 
 # Timed trial
 var trial_button: Button
@@ -69,9 +61,6 @@ var trial_active := false
 func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
-
-	_lean_left_threshold_x = -BoardData.L_HALF * 0.3
-	_lean_right_threshold_x = BoardData.right_board_offset.x + BoardData.L_HALF * 0.3
 
 	theme = UiTheme.theme
 	var bg := UiTheme.make_background()
@@ -102,6 +91,13 @@ func _ready() -> void:
 	columns.add_theme_constant_override("separation", 18)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(columns)
+	_live_view = columns
+
+	# Second tab: whole-file analysis + PDF report (hidden until selected).
+	_analysis_view = AnalysisView.new()
+	_analysis_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_analysis_view.visible = false
+	root.add_child(_analysis_view)
 
 	# Left: boards on top, reach + trial cards underneath.
 	var left_col := VBoxContainer.new()
@@ -114,7 +110,8 @@ func _ready() -> void:
 	var bottom_row := HBoxContainer.new()
 	bottom_row.add_theme_constant_override("separation", 18)
 	left_col.add_child(bottom_row)
-	_build_ml_section(bottom_row)
+	_build_reach_section(bottom_row, "ml")
+	_build_reach_section(bottom_row, "ap")
 	_build_trial_section(bottom_row)
 
 	# Right: full-height weight bar chart.
@@ -129,6 +126,29 @@ func _ready() -> void:
 	SerialLink.auto_connect_finished.connect(_on_auto_connect_finished)
 	_refresh_live()
 	set_process(true)
+
+## -- Tabs ---------------------------------------------------------------------
+
+var _live_view: Control
+var _analysis_view: AnalysisView
+
+func _show_tab(analysis: bool) -> void:
+	_live_view.visible = not analysis
+	_analysis_view.visible = analysis
+	if analysis:
+		_analysis_view.refresh_list()  # pick up recordings made in this visit
+
+func _tab_pressed_box() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(UiTheme.COLOR_YELLOW, 0.12)
+	sb.border_color = UiTheme.COLOR_YELLOW
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(UiTheme.CORNER_RADIUS)
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	return sb
 
 ## -- Layout -------------------------------------------------------------------
 
@@ -148,6 +168,22 @@ func _build_header(root: VBoxContainer) -> void:
 	connection_label = UiTheme.make_field_label(_connection_text())
 	connection_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	titles.add_child(connection_label)
+
+	# Tabs: live assessment / analysis & report.
+	var group := ButtonGroup.new()
+	for tab in [["Live assessment", false], ["Analysis & report", true]]:
+		var b := UiTheme.make_secondary_button(tab[0])
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = not tab[1]
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		b.pressed.connect(_show_tab.bind(tab[1]))
+		b.add_theme_stylebox_override("pressed", _tab_pressed_box())
+		b.add_theme_color_override("font_pressed_color", UiTheme.COLOR_YELLOW)
+		row.add_child(b)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(12, 0)
+	row.add_child(spacer)
 
 	auto_button = UiTheme.make_accent_button("Auto connect")
 	auto_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -216,20 +252,36 @@ func _build_weight_section(parent: VBoxContainer) -> void:
 	weight_chart.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(weight_chart)
 
-func _build_ml_section(parent: Control) -> void:
-	var box := _make_card(parent, "Limits of stability", "Medial-lateral reach")
-	var hint := UiTheme.make_field_label("Lean left and capture the minimum, then lean right and capture the maximum.")
+## One limits-of-stability card per axis ("ml" = left/right, "ap" =
+## back/front); state lives in _reach[axis].
+func _build_reach_section(parent: Control, axis: String) -> void:
+	var ml := axis == "ml"
+	var box := _make_card(parent, "Limits of stability",
+		"Medial-lateral reach" if ml else "Anterior-posterior reach")
+	var hint := UiTheme.make_field_label(
+		"Start, lean fully left then right, then Stop & save." if ml
+		else "Start, lean fully forward then back, then Stop & save.")
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(hint)
 
-	ml_button = UiTheme.make_primary_button("Capture min (lean left)")
-	ml_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	ml_button.pressed.connect(_on_ml_button_pressed)
-	box.add_child(ml_button)
+	var start_text := "Start ML capture" if ml else "Start AP capture"
+	var button := UiTheme.make_primary_button(start_text)
+	button.pressed.connect(_on_reach_pressed.bind(axis))
+	box.add_child(button)
 
-	ml_result_label = UiTheme.make_field_label("")
-	ml_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(ml_result_label)
+	var readout := UiTheme.make_field_label("Left -- · Right --" if ml else "Back -- · Front --")
+	readout.add_theme_color_override("font_color", UiTheme.COLOR_YELLOW)
+	readout.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # never widen the card
+	box.add_child(readout)
+
+	var status := UiTheme.make_field_label("")
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(status)
+
+	_reach[axis] = {
+		"active": false, "min": null, "max": null,
+		"button": button, "start_text": start_text, "readout": readout, "status": status,
+	}
 
 func _build_trial_section(parent: Control) -> void:
 	var box := _make_card(parent, "Raw data logging", "Timed trial")
@@ -238,15 +290,19 @@ func _build_trial_section(parent: Control) -> void:
 	row.add_theme_constant_override("separation", 16)
 	box.add_child(row)
 
-	timer_label = UiTheme.make_value_label(_format_timer(SessionPaths.trial_duration))
+	timer_label = UiTheme.make_value_label(_format_timer(_trial_seconds()))
 	row.add_child(timer_label)
 
 	var info_col := VBoxContainer.new()
 	info_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	info_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # gives the wrapping label a width
 	row.add_child(info_col)
 	trial_label = UiTheme.make_field_label("Trial: 0")
 	info_col.add_child(trial_label)
 	trial_logging_status = UiTheme.make_field_label("Not started")
+	# Status messages wrap instead of widening the card, which pushed the
+	# Weight column off the right edge of the screen during a trial.
+	trial_logging_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info_col.add_child(trial_logging_status)
 
 	trial_button = UiTheme.make_accent_button("Start trial")
@@ -287,8 +343,6 @@ func _process(delta: float) -> void:
 		timer_label.add_theme_color_override(
 			"font_color", UiTheme.COLOR_DESTRUCTIVE if trial_remaining <= 5.0 else UiTheme.COLOR_YELLOW
 		)
-		if SerialLink.has_left_data() or SerialLink.has_right_data():
-			BoardData.log_trial_frame(SerialLink.left_adc, SerialLink.right_adc)
 		if trial_remaining <= 0.0:
 			_stop_trial()
 
@@ -329,6 +383,7 @@ func _refresh_live() -> void:
 	else:
 		combined_label.text = "Combined COP (left-board origin): (%.1f, %.1f) cm" % [c_cop.x, c_cop.y]
 
+	_sample_reach(lf, rf, has_l, has_r)
 	weight_chart.set_values(left_w, right_w, has_l, has_r)
 	total_label.text = "%.1f kg" % total_w if (has_l or has_r) else "-- kg"
 
@@ -338,77 +393,120 @@ func _refresh_live() -> void:
 func _shown_weight(w: float) -> float:
 	return w if w > WEIGHT_DISPLAY_MIN else 0.0
 
-## -- ML reach capture -----------------------------------------------------
+## -- Reach capture (ML + AP) ---------------------------------------------
+## Press Start, the patient leans as far as they can both ways, press Stop &
+## save. While recording, every sample with real load updates the furthest
+## combined COP reached in each direction, so no lean threshold has to be
+## hit at the exact moment a button is pressed (the old press-at-the-extreme
+## flow kept rejecting genuine leans).
 
-func _on_ml_button_pressed() -> void:
-	if not got_min:
-		_try_capture_min()
+func _sample_reach(lf: Array, rf: Array, has_l: bool, has_r: bool) -> void:
+	if not (_reach.ml.active or _reach.ap.active):
+		return
+	var zero := [0.0, 0.0, 0.0, 0.0]
+	var l := lf if has_l else zero
+	var r := rf if has_r else zero
+	var lw := BoardData.total_weight(l)
+	var rw := BoardData.total_weight(r)
+	if lw + rw <= NO_LOAD_WEIGHT:
+		return
+	var c = BoardData.combined_cop(l, r)
+	if c == null:
+		return
+	var snap := {"cop": c, "lf": l.duplicate(), "rf": r.duplicate(), "lw": lw, "rw": rw}
+	for axis in ["ml", "ap"]:
+		var st: Dictionary = _reach[axis]
+		if not st.active:
+			continue
+		var v: float = c.x if axis == "ml" else c.y
+		if st.min == null or v < _axis_value(st.min, axis):
+			st.min = snap
+		if st.max == null or v > _axis_value(st.max, axis):
+			st.max = snap
+		_update_reach_readout(axis)
+
+func _axis_value(snap: Dictionary, axis: String) -> float:
+	return snap.cop.x if axis == "ml" else snap.cop.y
+
+func _update_reach_readout(axis: String) -> void:
+	var st: Dictionary = _reach[axis]
+	if st.min == null:
+		st.readout.text = "Waiting for load on the boards..."
+		return
+	var lo := _axis_value(st.min, axis)
+	var hi := _axis_value(st.max, axis)
+	var names := ["Left", "Right"] if axis == "ml" else ["Back", "Front"]
+	st.readout.text = "%s %.1f cm   ·   %s %.1f cm   ·   Range %.1f cm" % [names[0], lo, names[1], hi, hi - lo]
+
+func _on_reach_pressed(axis: String) -> void:
+	var st: Dictionary = _reach[axis]
+	if not st.active:
+		if not (SerialLink.has_left_data() or SerialLink.has_right_data()):
+			UiTheme.set_status(st.status, "no board data. Press Auto connect first.", "error")
+			return
+		st.active = true
+		st.min = null
+		st.max = null
+		st.button.text = "Stop & save"
+		_update_reach_readout(axis)
+		_start_reach_raw_log(axis)
+		var how := "left and right" if axis == "ml" else "forward and back"
+		UiTheme.set_status(st.status, "recording: lean as far %s as you can." % how, "neutral")
+		return
+	st.active = false
+	st.button.text = st.start_text
+	if _reach_log_axis == axis:
+		_stop_reach_raw_log()
+	if st.min == null or _axis_value(st.max, axis) - _axis_value(st.min, axis) < MIN_REACH_RANGE:
+		UiTheme.set_status(st.status, "range under %.0f cm, not saved. Lean further and try again." % MIN_REACH_RANGE, "error")
+		return
+	var ok: bool = _write_ml_csv(st.min, st.max) if axis == "ml" else _write_ap_csv(st.min, st.max)
+	if ok:
+		UiTheme.set_status(st.status, "saved; games use this range.", "success")
+		SessionPaths.log_event("%s reach saved: %.1f to %.1f cm" % [
+			axis.to_upper(), _axis_value(st.min, axis), _axis_value(st.max, axis)])
 	else:
-		_try_capture_max()
+		UiTheme.set_status(st.status, "could not write the assessment CSV.", "error")
 
-func _try_capture_min() -> void:
-	var left_forces := SerialLink.left_forces()
-	var right_forces := SerialLink.right_forces()
-	var left_w := BoardData.total_weight(left_forces)
-	var right_w := BoardData.total_weight(right_forces)
-	var cop = BoardData.combined_cop(left_forces, right_forces)
-	if cop == null or left_w <= right_w or cop.x >= _lean_left_threshold_x:
-		UiTheme.set_status(ml_result_label, "lean further left, then press again to capture the minimum.", "error")
-		return
-	var total_w := left_w + right_w
-	var local_cop = BoardData.board_cop(left_forces)
-	var lx: float = 0.0 if local_cop == null else local_cop.x
-	var ly: float = 0.0 if local_cop == null else local_cop.y
-	min_row = "%.3f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f" % [
-		cop.x, (right_w / total_w) * 100.0, (left_w / total_w) * 100.0, lx, ly, cop.x, cop.y, left_w
+## Unity's ML row layout: COP x, right %, left %, the leaning board's local
+## COP, combined COP, the leaning board's weight -- for the min, then the max.
+func _ml_fields(s: Dictionary, lean_side: String) -> String:
+	var total: float = s.lw + s.rw
+	var forces: Array = s.lf if lean_side == "left" else s.rf
+	var local = BoardData.board_cop(forces)
+	var lx: float = 0.0 if local == null else local.x
+	var ly: float = 0.0 if local == null else local.y
+	return "%.3f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f" % [
+		s.cop.x, s.rw / total * 100.0, s.lw / total * 100.0, lx, ly, s.cop.x, s.cop.y,
+		s.lw if lean_side == "left" else s.rw,
 	]
-	got_min = true
-	ml_button.text = "Capture max (lean right)"
-	UiTheme.set_status(ml_result_label, "minimum captured (COP x = %.1f cm). Now lean right." % cop.x, "success")
 
-func _try_capture_max() -> void:
-	var left_forces := SerialLink.left_forces()
-	var right_forces := SerialLink.right_forces()
-	var left_w := BoardData.total_weight(left_forces)
-	var right_w := BoardData.total_weight(right_forces)
-	var cop = BoardData.combined_cop(left_forces, right_forces)
-	if cop == null or right_w <= left_w or cop.x <= _lean_right_threshold_x:
-		UiTheme.set_status(ml_result_label, "lean further right, then press again to capture the maximum.", "error")
-		return
-	var total_w := left_w + right_w
-	var local_cop = BoardData.board_cop(right_forces)
-	var rx: float = 0.0 if local_cop == null else local_cop.x
-	var ry: float = 0.0 if local_cop == null else local_cop.y
-	max_row = "%.3f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f" % [
-		cop.x, (right_w / total_w) * 100.0, (left_w / total_w) * 100.0, rx, ry, cop.x, cop.y, right_w
+func _write_ml_csv(mn: Dictionary, mx: Dictionary) -> bool:
+	return _append_csv("min_max_dist_ml.csv", ML_CSV_HEADER,
+		"%s, %s" % [_ml_fields(mn, "left"), _ml_fields(mx, "right")])
+
+func _write_ap_csv(mn: Dictionary, mx: Dictionary) -> bool:
+	var row := "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f" % [
+		mn.cop.x, mn.cop.y, mn.lw + mn.rw, mx.cop.x, mx.cop.y, mx.lw + mx.rw, mx.cop.y - mn.cop.y
 	]
-	got_max = true
-	_write_ml_csv()
+	return _append_csv("min_max_dist_ap.csv", AP_CSV_HEADER, row)
 
-func _write_ml_csv() -> void:
-	var path := SessionPaths.assess_folder.path_join("min_max_dist_ml.csv")
+func _append_csv(file_name: String, header: String, row: String) -> bool:
+	SessionPaths.ensure_session()
+	DirAccess.make_dir_recursive_absolute(SessionPaths.assess_folder)
+	var path := SessionPaths.assess_folder.path_join(file_name)
 	var is_new := not FileAccess.file_exists(path)
-	var f: FileAccess
-	if is_new:
-		f = FileAccess.open(path, FileAccess.WRITE)
-		if f:
-			f.store_string(ML_CSV_HEADER)
-	else:
-		f = FileAccess.open(path, FileAccess.READ_WRITE)
-		if f:
-			f.seek_end()
+	var f := FileAccess.open(path, FileAccess.WRITE if is_new else FileAccess.READ_WRITE)
 	if f == null:
-		UiTheme.set_status(ml_result_label, "could not write assessment CSV.", "error")
-		return
-	f.store_line("%s, %s" % [min_row, max_row])
+		return false
+	if is_new:
+		f.store_string(header)
+	else:
+		f.seek_end()
+	f.store_line(row)
 	f.close()
-
-	UiTheme.set_status(ml_result_label, "ML reach recorded and saved.", "success")
-	got_min = false
-	got_max = false
-	min_row = ""
-	max_row = ""
-	ml_button.text = "Capture min (lean left)"
+	SessionPaths.invalidate_limits()  # games pick up the new range immediately
+	return true
 
 ## -- Timed trial raw logging ----------------------------------------------
 
@@ -421,22 +519,49 @@ func _on_trial_button_pressed() -> void:
 func _start_trial() -> void:
 	trial_count += 1
 	trial_label.text = "Trial: %d" % trial_count
-	trial_remaining = float(SessionPaths.trial_duration)
+	trial_remaining = float(_trial_seconds())
 	trial_active = true
+	_stop_reach_raw_log()  # one raw file at a time; the trial takes over
 
+	SessionPaths.ensure_session()
 	var folder := SessionPaths.assess_folder.path_join(
-		"%s%s" % [SessionPaths.hosp_num, Time.get_datetime_string_from_system().replace(":", "-")]
+		"%s%s" % [SessionPaths.hosp_num, SessionPaths.file_stamp()]
 	)
-	DirAccess.make_dir_recursive_absolute(folder)
 	BoardData.start_trial_log(folder.path_join("Trial"), trial_count)
+	SessionPaths.log_event("sit assessment trial %d started (%d s)" % [trial_count, _trial_seconds()])
 
 	trial_button.text = "Stop trial"
-	UiTheme.set_status(trial_logging_status, "assessment trial started.", "success")
+	UiTheme.set_status(trial_logging_status, "recording.", "success")
 
 func _stop_trial() -> void:
 	trial_active = false
 	BoardData.stop_trial_log()
 	trial_button.text = "Start trial"
-	timer_label.text = _format_timer(SessionPaths.trial_duration)
+	timer_label.text = _format_timer(_trial_seconds())
 	timer_label.add_theme_color_override("font_color", UiTheme.COLOR_YELLOW)
-	UiTheme.set_status(trial_logging_status, "assessment data recorded.", "success")
+	UiTheme.set_status(trial_logging_status, "trial saved.", "success")
+
+## Login sets the trial length; opened without login it would be 0 s.
+func _trial_seconds() -> int:
+	return SessionPaths.trial_duration if SessionPaths.trial_duration > 0 else DEFAULT_TRIAL_SECONDS
+
+## Reach captures also record the full raw trajectory (Rawdata-style file
+## in assessment/), unless a timed trial is already recording.
+func _start_reach_raw_log(axis: String) -> void:
+	if trial_active or BoardData.is_trial_logging:
+		return
+	SessionPaths.ensure_session()
+	var path := SessionPaths.assess_folder.path_join("%s_reach_%s" % [axis.to_upper(), SessionPaths.file_stamp()])
+	BoardData.start_trial_log(path, 1)
+	_reach_log_axis = axis
+
+func _stop_reach_raw_log() -> void:
+	if _reach_log_axis != "":
+		BoardData.stop_trial_log()
+		_reach_log_axis = ""
+
+func _exit_tree() -> void:
+	_stop_reach_raw_log()
+	if trial_active:
+		trial_active = false
+		BoardData.stop_trial_log()

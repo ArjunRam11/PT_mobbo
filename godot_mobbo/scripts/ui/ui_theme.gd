@@ -237,6 +237,18 @@ func _build_theme() -> Theme:
 	sep.thickness = 1
 	t.set_stylebox("separator", "HSeparator", sep)
 
+	t.set_stylebox("panel", "ItemList", _flat_box(COLOR_BACKGROUND, COLOR_BORDER, 1))
+	t.set_stylebox("focus", "ItemList", _flat_box(Color.TRANSPARENT))
+	t.set_stylebox("selected", "ItemList", _flat_box(Color(COLOR_YELLOW, 0.18)))
+	t.set_stylebox("selected_focus", "ItemList", _flat_box(Color(COLOR_YELLOW, 0.18), COLOR_YELLOW, 1))
+	t.set_stylebox("hovered", "ItemList", _flat_box(COLOR_SURFACE_RAISED))
+	t.set_stylebox("cursor", "ItemList", _flat_box(Color.TRANSPARENT))
+	t.set_stylebox("cursor_unfocused", "ItemList", _flat_box(Color.TRANSPARENT))
+	t.set_color("font_color", "ItemList", COLOR_MUTED_TEXT)
+	t.set_color("font_hovered_color", "ItemList", COLOR_TEXT)
+	t.set_color("font_selected_color", "ItemList", COLOR_YELLOW)
+	t.set_constant("v_separation", "ItemList", 6)
+
 	t.set_stylebox("panel", "TooltipPanel", _flat_box(COLOR_SURFACE_RAISED, COLOR_BORDER, 1))
 	t.set_color("font_color", "TooltipLabel", COLOR_TEXT)
 	t.set_font_size("font_size", "TooltipLabel", FONT_SIZE_SMALL)

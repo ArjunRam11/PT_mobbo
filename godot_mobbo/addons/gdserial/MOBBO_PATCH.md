@@ -31,7 +31,8 @@ and with the stock DLL it reports "LC1 reads exactly 0" instead of failing silen
 git clone --depth 1 --branch v0.3.4 https://github.com/SujithChristopher/gdserial.git
 cd gdserial
 git apply <path-to>/addons/gdserial/mobbo_dtr.patch
-cargo build --release
+# Static C runtime: the DLL then runs on PCs without the VC++ redistributable.
+RUSTFLAGS="-C target-feature=+crt-static" cargo build --release
 copy target\release\gdserial.dll <project>\godot_mobbo\addons\gdserial\bin\windows-x86_64\gdserial.dll
 ```
 

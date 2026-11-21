@@ -98,15 +98,24 @@ func combined_cop(left_forces: Array, right_forces: Array) -> Variant:
 	return Vector2(x / total_w, y / total_w)
 
 ## -- Per-trial raw data logging ----------------------------------------
-## Mirrors MoBBoLibrary_WIFI.DataLogger/MoBBoDeviceUDP's pattern: rows are
-## accumulated in memory and written to disk once, when the trial stops,
-## not on every frame. Header/columns are the same shape as Unity's
-## MoBBoDeviceUDP.DataHeader ("ID,systime,devtime,f1,f2,f3,f4,x,y,F,
-## annotation") with "ID" replaced by "side" ("left"/"right"), since this
-## rig is always exactly two boards rather than N arbitrary registered
-## devices.
+## One row per board packet (~85 Hz per board), written as it arrives by
+## SerialLink calling log_packet() -- not once per screen frame, which
+## duplicated some samples and dropped others. The first 11 columns are
+## Unity's MoBBoDeviceUDP.DataHeader with "ID" -> "side" (left/right):
+##   systime  wall-clock time of the row
+##   devtime  ms since the trial started
+##   f1..f4   per-sensor force, kg (tared)
+##   x, y     that board's own COP, cm, from its centre (+x right, +y front);
+##            0,0 when the board carries <= COP_LOG_MIN_WEIGHT
+##   F        that board's total weight, kg
+## Added after Unity's columns, so old readers keep working:
+##   gcop_x, gcop_y  combined COP of both boards, cm, left-board-centre frame
+##   W_total         both boards' weight, kg
+##   adc1..adc4      the raw HX711 counts, so the data can be recalibrated
+##                   later with different numbers (see session_info.csv)
 
-const TRIAL_DATA_HEADER := "side,systime,devtime,f1,f2,f3,f4,x,y,F,annotation\n"
+const TRIAL_DATA_HEADER := "side,systime,devtime,f1,f2,f3,f4,x,y,F,annotation,gcop_x,gcop_y,W_total,adc1,adc2,adc3,adc4\n"
+const COP_LOG_MIN_WEIGHT := 1.0  # kg
 
 ## Static per Unity's MoBBoDeviceUDP.annotation -- nothing in the UI sets
 ## this yet (it wasn't wired up in the original either), kept for parity.
@@ -123,37 +132,50 @@ var is_trial_logging: bool:
 ## combined in Unity (e.g. StepperGameManager's logFilePath). Returns the
 ## log file's path.
 func start_trial_log(base_path: String, trial: int) -> String:
+	if _trial_logger != null:
+		stop_trial_log()  # never leave a previous file open
 	var fname := "%s-%d.csv" % [base_path, trial]
 	_trial_logger = MoBBoDataLogger.new(fname, TRIAL_DATA_HEADER)
 	_trial_start_ms = Time.get_ticks_msec()
+	SessionPaths.log_event("raw log started: %s | left %s right %s | left tare %s | right tare %s" % [
+		fname, SerialLink.left_port, SerialLink.right_port, str(left_tare_adc), str(right_tare_adc)
+	])
 	return fname
 
-## Call once per frame while a trial is active, with the latest raw ADC for
-## each board. Writes one row per board (so a stepper/weight-shift reader
-## can tell which board a row came from, the same way Unity's rows carried
-## a device ID).
-func log_trial_frame(left_adc: Array, right_adc: Array) -> void:
-	if _trial_logger == null:
-		return
-	var systime := Time.get_datetime_string_from_system()
-	var devtime := Time.get_ticks_msec() - _trial_start_ms
-	_log_trial_row("left", left_adc, systime, devtime)
-	_log_trial_row("right", right_adc, systime, devtime)
-
-func _log_trial_row(side: String, adc: Array, systime: String, devtime: int) -> void:
-	if adc.size() != 4:
+## Called by SerialLink for every accepted packet from either board.
+func log_packet(side: String, adc: Array) -> void:
+	if _trial_logger == null or adc.size() != 4:
 		return
 	var forces := forces_from_raw(adc, side)
-	var cop = board_cop(forces)
+	var w := total_weight(forces)
+	var cop = board_cop(forces) if w > COP_LOG_MIN_WEIGHT else null
 	var cx: float = 0.0 if cop == null else cop.x
 	var cy: float = 0.0 if cop == null else cop.y
-	var w := total_weight(forces)
-	_trial_logger.log_data("%s, %s, %d, %.10f, %.10f, %.10f, %.10f, %.10f, %.10f, %.10f, %s\n" % [
-		side, systime, devtime, forces[0], forces[1], forces[2], forces[3], cx, cy, w, annotation
+	var lf := SerialLink.left_forces()
+	var rf := SerialLink.right_forces()
+	var w_total := total_weight(lf) + total_weight(rf)
+	var g = combined_cop(lf, rf) if w_total > COP_LOG_MIN_WEIGHT else null
+	var gx: float = 0.0 if g == null else g.x
+	var gy: float = 0.0 if g == null else g.y
+	_trial_logger.log_data("%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.4f,%s,%.3f,%.3f,%.4f,%d,%d,%d,%d\n" % [
+		side, Time.get_datetime_string_from_system(), Time.get_ticks_msec() - _trial_start_ms,
+		forces[0], forces[1], forces[2], forces[3], cx, cy, w, annotation,
+		gx, gy, w_total, adc[0], adc[1], adc[2], adc[3],
 	])
+
+## Kept so older callers don't break; logging is now per packet.
+func log_trial_frame(_left_adc: Array, _right_adc: Array) -> void:
+	pass
 
 func stop_trial_log() -> void:
 	if _trial_logger == null:
 		return
+	var fname := _trial_logger.curr_fname
+	var rows := _trial_logger.rows_written
 	_trial_logger.stop_data_log(true)
 	_trial_logger = null
+	SessionPaths.log_event("raw log saved: %s (%d rows)" % [fname, rows])
+
+## Closing the window mid-trial still closes the file cleanly.
+func _exit_tree() -> void:
+	stop_trial_log()
