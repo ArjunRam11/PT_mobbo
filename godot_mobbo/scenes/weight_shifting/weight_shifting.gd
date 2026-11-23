@@ -38,12 +38,14 @@ func _on_record_pressed() -> void:
 	if recorder.active:
 		recorder.stop("finished")
 		record_button.text = "Start recording"
+		Sfx.play("rec_stop")
 		return
 	trial_count += 1
 	_rec_elapsed = 0.0
 	_next_row_s = 0.0
 	recorder.start("ball_roller", "ball_roller_rawdata", "ball_roller_gamedata", GAME_DATA_HEADER, trial_count)
 	record_button.text = "Stop & save"
+	Sfx.play("rec_start")
 
 func _exit_tree() -> void:
 	recorder.stop("left screen")
@@ -52,64 +54,48 @@ func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
 
-	theme = UiTheme.theme
-	var bg := UiTheme.make_background()
-	bg.color = UiTheme.COLOR_BACKGROUND
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	var hud := GameHud.build(self, "Weight Shifting",
+		"Shift your weight left/right to tilt the plank and roll the marble.", "music_tilt")
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 28)
-	add_child(margin)
+	var level_chip := HudChip.create("Level: 0", "marble")
+	level_label = level_chip.label
+	hud.chips.add_child(level_chip)
+	var tilt_chip := HudChip.create("Tilt: 0.0 deg", "", false)  # changes every frame -> no pop
+	tilt_label = tilt_chip.label
+	tilt_chip.custom_minimum_size.x = 130
+	hud.chips.add_child(tilt_chip)
 
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 16)
-	margin.add_child(root)
-
-	root.add_child(UiTheme.make_heading("Weight Shifting"))
-	root.add_child(UiTheme.make_muted_label("Shift your weight left/right to roll the ball; keep it on the board."))
-
-	var info_row := HBoxContainer.new()
-	info_row.add_theme_constant_override("separation", 24)
-	root.add_child(info_row)
-	level_label = UiTheme.make_field_label("Level: 0")
-	info_row.add_child(level_label)
-	tilt_label = UiTheme.make_field_label("Tilt: 0.0 deg")
-	info_row.add_child(tilt_label)
-
+	# Same size as before (min 500x320, full width, no vertical expand): the
+	# ball's bounds come from arena.size, so the slot only centres it.
 	arena = TiltArena.new()
 	arena.custom_minimum_size = Vector2(500, 320)
-	root.add_child(arena)
+	hud.arena_slot.add_child(arena)
 
-	var level_row := HBoxContainer.new()
-	level_row.add_theme_constant_override("separation", 12)
-	root.add_child(level_row)
 	record_button = UiTheme.make_accent_button("Start recording")
 	record_button.pressed.connect(_on_record_pressed)
-	level_row.add_child(record_button)
+	hud.buttons.add_child(record_button)
 	var down_btn := UiTheme.make_secondary_button("Level Down")
 	down_btn.pressed.connect(_decrement_level)
-	level_row.add_child(down_btn)
+	hud.buttons.add_child(down_btn)
 	var up_btn := UiTheme.make_primary_button("Level Up")
 	up_btn.pressed.connect(_increment_level)
-	level_row.add_child(up_btn)
+	hud.buttons.add_child(up_btn)
 
 	var back := UiTheme.make_secondary_button("Back to Hub")
 	back.pressed.connect(func(): get_tree().change_scene_to_file(HUB_SCENE))
-	level_row.add_child(back)
+	hud.buttons.add_child(back)
 
 	set_process(true)
 
 func _increment_level() -> void:
 	level = min(level + 1, MAX_LEVEL)
 	level_label.text = "Level: %d" % level
+	Sfx.play("level_up")
 
 func _decrement_level() -> void:
 	level = max(level - 1, 0)
 	level_label.text = "Level: %d" % level
+	Sfx.play("level_down")
 
 func _process(delta: float) -> void:
 	var lf := SerialLink.left_forces()
@@ -123,7 +109,9 @@ func _process(delta: float) -> void:
 		right_w = lf[1] + lf[2] + rf[1] + rf[2]
 	var diff: float = clamp(right_w - left_w, -100.0, 100.0)
 	var target_tilt_deg: float = (diff / 100.0) * MAX_TILT_DEG
-	current_tilt_deg = lerp(current_tilt_deg, target_tilt_deg, delta * TILT_LERP_SPEED)
+	# Frame-rate independent smoothing (the old lerp weight delta*6 overshot
+	# on a slow frame, delta > 1/6 s, and tilted faster on fast PCs).
+	current_tilt_deg = lerp(current_tilt_deg, target_tilt_deg, 1.0 - exp(-TILT_LERP_SPEED * delta))
 	tilt_label.text = "Tilt: %.1f deg" % current_tilt_deg
 
 	var tilt_rad := deg_to_rad(current_tilt_deg)
@@ -141,6 +129,7 @@ func _process(delta: float) -> void:
 		ball_pos.y = clamp(ball_pos.y, -bound.y, bound.y)
 		ball_vel.y *= -0.4
 
+	arena.recording = recorder.active
 	arena.set_state(tilt_rad, ball_pos)
 
 	if recorder.active:

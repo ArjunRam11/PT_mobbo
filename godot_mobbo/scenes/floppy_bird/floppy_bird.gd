@@ -13,7 +13,7 @@ const ARENA_SIZE := Vector2(560, 380)
 const SMOOTH_WINDOW := 10
 const MAX_LEVEL := 10
 const MIN_LIVES := 5
-const PIPE_GAP_HALF := 80.0
+const PIPE_GAP_HALF := 105.0  # widened with the bigger bird (BIRD_RADIUS 24)
 
 var arena: FlappyArena
 var timer_label: Label
@@ -52,57 +52,41 @@ func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
 
-	theme = UiTheme.theme
-	var bg := UiTheme.make_background()
-	bg.color = UiTheme.COLOR_BACKGROUND
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	var hud := GameHud.build(self, "Floppy Bird",
+		"Lean forward/back within your measured range to fly through the gaps. Up/Down keys change level.",
+		"music_bird")
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 24)
-	add_child(margin)
-
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 14)
-	margin.add_child(root)
-
-	root.add_child(UiTheme.make_heading("Floppy Bird"))
-	root.add_child(UiTheme.make_muted_label("Lean forward/back within your measured range to keep the bird level."))
-
-	var info_row := HBoxContainer.new()
-	info_row.add_theme_constant_override("separation", 20)
-	root.add_child(info_row)
-	timer_label = UiTheme.make_field_label("Time: --")
-	info_row.add_child(timer_label)
-	level_label = UiTheme.make_field_label("Level: 0")
-	info_row.add_child(level_label)
-	score_label = UiTheme.make_field_label("Score: 0")
-	info_row.add_child(score_label)
-	lives_label = UiTheme.make_field_label("Lives: %d" % MIN_LIVES)
-	info_row.add_child(lives_label)
+	var timer_chip := HudChip.create("Time: --", "", false)
+	timer_label = timer_chip.label
+	hud.chips.add_child(timer_chip)
+	var level_chip := HudChip.create("Level: 0")
+	level_label = level_chip.label
+	hud.chips.add_child(level_chip)
+	var score_chip := HudChip.create("Score: 0", "bird_mid")
+	score_label = score_chip.label
+	hud.chips.add_child(score_chip)
+	var lives_chip := HudChip.create("Lives: %d" % MIN_LIVES, "heart")
+	lives_label = lives_chip.label
+	hud.chips.add_child(lives_chip)
 
 	arena = FlappyArena.new()
 	arena.custom_minimum_size = ARENA_SIZE
 	arena.size_flags_vertical = Control.SIZE_EXPAND_FILL  # fill the screen
-	root.add_child(arena)
+	arena.max_lives = MIN_LIVES
+	hud.arena_slot.add_child(arena)
 
-	status_label = UiTheme.make_subheading("")
-	root.add_child(status_label)
+	status_label = GameHud.make_status_label()
+	hud.status.add_child(status_label)
 
-	var button_row := HBoxContainer.new()
-	button_row.add_theme_constant_override("separation", 12)
-	root.add_child(button_row)
 	start_button = UiTheme.make_accent_button("Start Trial")
 	start_button.pressed.connect(_on_start_pressed)
-	button_row.add_child(start_button)
+	hud.buttons.add_child(start_button)
 	var back := UiTheme.make_secondary_button("Back to Hub")
 	back.pressed.connect(func(): get_tree().change_scene_to_file(HUB_SCENE))
-	button_row.add_child(back)
+	hud.buttons.add_child(back)
 
 	arena.set_state(bird_y, pipes)
+	arena.show_banner("Floppy Bird", "Press Start Trial")
 	set_process(true)
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -116,16 +100,24 @@ func _increment_level() -> void:
 	if level >= MAX_LEVEL:
 		return
 	level += 1
-	spawn_rate = clamp(spawn_rate - 0.5, min_spawn_rate, max_spawn_rate)
-	pipe_speed = clamp(2.0 * 40.0 + 0.5 * 40.0 * level, pipe_speed_min, pipe_speed_max)
-	level_label.text = "Level: %d" % level
+	_apply_level()
+	Sfx.play("level_up")
 
 func _decrement_level() -> void:
 	if level <= 0:
 		return
 	level -= 1
-	spawn_rate = clamp(spawn_rate + 0.5, min_spawn_rate, max_spawn_rate)
-	pipe_speed = clamp(2.0 * 40.0 + 0.75 * 40.0 * (level - 1), pipe_speed_min, pipe_speed_max)
+	_apply_level()
+	Sfx.play("level_down")
+
+## Spawn interval and pillar speed are a function of the level alone, so
+## going up then down returns exactly to where you were. (Before, up used
+## 0.5*level and down 0.75*(level-1) for speed, and the spawn interval
+## stepped +-0.5 from wherever its clamp had left it.) Level 0 = 5 s / 80
+## px/s; each level -0.5 s (floor 1 s) and +20 px/s.
+func _apply_level() -> void:
+	spawn_rate = clamp(max_spawn_rate - 0.5 * level, min_spawn_rate, max_spawn_rate)
+	pipe_speed = clamp(2.0 * 40.0 + 0.5 * 40.0 * level, pipe_speed_min, pipe_speed_max)
 	level_label.text = "Level: %d" % level
 
 func _on_start_pressed() -> void:
@@ -144,6 +136,9 @@ func _on_start_pressed() -> void:
 	trial_active = true
 	start_button.text = "Restart"
 	recorder.start("floppybird", "floppybird_rawdata", "floppybird_gamedata", GAME_DATA_HEADER, trial_count)
+	arena.hide_banner()
+	arena.next_bird()  # cosmetic: a different bird each trial
+	Sfx.play("start")
 
 func _exit_tree() -> void:
 	recorder.stop("left early" if trial_active else "finished")
@@ -185,6 +180,9 @@ func _process(delta: float) -> void:
 		if trial_remaining <= 0.0:
 			_end_trial()
 
+	arena.recording = trial_active
+	arena.lives = lives if trial_active else -1
+	arena.scroll_speed = pipe_speed if trial_active else 0.0
 	arena.set_state(bird_y, pipes)
 
 func _update_pipes(delta: float) -> void:
@@ -196,21 +194,35 @@ func _update_pipes(delta: float) -> void:
 			"gap_center_y": randf_range(PIPE_GAP_HALF + 10, _area().y - PIPE_GAP_HALF - 10),
 			"gap_half": PIPE_GAP_HALF,
 			"scored": false,
+			"hit": false,
 		})
 
+	# Collision uses the bird's body (BIRD_RADIUS) against the pillar's full
+	# width, for the whole time they overlap -- not just the bird's centre
+	# at the single frame the pillar's centre passed it. Touching a pillar
+	# costs one life (once per pillar); clearing it untouched scores.
 	var bird_x := _area().x * 0.25
+	var r := FlappyArena.BIRD_RADIUS
+	var reach_x := FlappyArena.PIPE_WIDTH * 0.5 + r
 	var i := pipes.size() - 1
 	while i >= 0:
 		var pipe = pipes[i]
 		var new_x: float = pipe.x - pipe_speed * delta
 		pipe.x = new_x
-		if not pipe.scored and new_x < bird_x:
+		var overlapping: bool = abs(new_x - bird_x) <= reach_x
+		var outside_gap: bool = abs(bird_y - pipe.gap_center_y) > pipe.gap_half - r
+		if overlapping and outside_gap and not pipe.hit:
+			pipe.hit = true
+			arena.fx_hit()
+			_lose_life()
+			if not trial_active:
+				return  # out of lives: trial already ended and saved
+		if not pipe.scored and new_x + reach_x < bird_x:
 			pipe.scored = true
-			if abs(bird_y - pipe.gap_center_y) <= pipe.gap_half:
+			if not pipe.hit:
 				score += 1
 				score_label.text = "Score: %d" % score
-			else:
-				_lose_life()
+				arena.fx_score()
 		if new_x < -FlappyArena.PIPE_WIDTH:
 			pipes.remove_at(i)
 		i -= 1
@@ -222,10 +234,15 @@ func _lose_life() -> void:
 		_end_trial()
 
 func _end_trial() -> void:
+	if not trial_active:
+		return  # lives and time can run out on the same frame
 	trial_active = false
 	start_button.text = "Start Trial"
 	UiTheme.set_status(status_label, "trial ended. Score: %d. Data saved." % score, "neutral")
 	recorder.stop("finished, score %d" % score)
+	var badge := "" if lives <= 0 else ("gold" if score >= 10 else ("silver" if score >= 5 else ("bronze" if score >= 1 else "")))
+	arena.show_banner("Trial ended", "Score %d  -  press Start Trial" % score, badge)
+	Sfx.play("game_over" if lives <= 0 else "win")
 
 ## The arena's real on-screen size (it stretches to fill the window);
 ## ARENA_SIZE is only its minimum / pre-layout fallback.

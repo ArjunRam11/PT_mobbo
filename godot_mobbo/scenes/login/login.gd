@@ -27,22 +27,47 @@ var signup_diagnosis: LineEdit
 var signup_amp_side: OptionButton
 var signup_amp_type: OptionButton
 
+const LOGO_H_BIG := 190.0
+const LOGO_H_SMALL := 104.0
+var title_logo: Control
+var tagline_label: Label
+
 func _ready() -> void:
 	theme = UiTheme.theme
-	var bg := UiTheme.make_background()
+	var bg := UiTheme.make_background("bg_main")
 	bg.color = UiTheme.COLOR_BACKGROUND
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
+	# Main screen: animated illustration of the rig (left) + login column (right).
+	var split := HBoxContainer.new()
+	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	split.add_theme_constant_override("separation", 24)
+	add_child(split)
+	# Rendered art if it's there (sprites/rig_hero_cut.png), else the code-drawn rig.
+	var showcase: RigShowcase = RigPhotoShowcase.new() if RigPhotoShowcase.available() else RigShowcase.new()
+	showcase.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	showcase.size_flags_stretch_ratio = 1.1
+	split.add_child(showcase)
+
+	# Right column scrolls if a form ever doesn't fit (small windows); it
+	# stays vertically centred when everything fits.
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	split.add_child(scroll)
 	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.alignment = BoxContainer.ALIGNMENT_CENTER
 	root.add_theme_constant_override("separation", 20)
-	add_child(root)
+	scroll.add_child(root)
 
-	root.add_child(UiTheme.make_app_title())
-	root.add_child(UiTheme.make_muted_label("Balance-board rehab sessions"))
+	title_logo = UiTheme.make_app_title(LOGO_H_BIG)
+	root.add_child(title_logo)
+	tagline_label = UiTheme.make_muted_label("Balance-board rehab sessions")
+	root.add_child(tagline_label)
 
 	message_label = UiTheme.make_muted_label("")
 	root.add_child(message_label)
@@ -92,7 +117,7 @@ func _build_login_panel(root: VBoxContainer) -> void:
 	box.add_child(button_row)
 
 	var cancel := UiTheme.make_secondary_button("Cancel")
-	cancel.pressed.connect(func(): login_panel.visible = false)
+	cancel.pressed.connect(_hide_panels)
 	button_row.add_child(cancel)
 
 	var submit := UiTheme.make_primary_button("Submit")
@@ -102,52 +127,70 @@ func _build_login_panel(root: VBoxContainer) -> void:
 func _build_signup_panel(root: VBoxContainer) -> void:
 	signup_panel = PanelContainer.new()
 	signup_panel.visible = false
-	signup_panel.custom_minimum_size = Vector2(420, 0)
+	signup_panel.custom_minimum_size = Vector2(540, 0)
 	signup_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	root.add_child(signup_panel)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 10)
+	box.add_theme_constant_override("separation", 14)
 	signup_panel.add_child(box)
 
-	box.add_child(UiTheme.make_field_label("Hospital No."))
+	# Two columns so the whole form fits on screen under the logo.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 10)
+	box.add_child(grid)
+
 	signup_hospno = UiTheme.make_line_edit()
-	box.add_child(signup_hospno)
-
-	box.add_child(UiTheme.make_field_label("Name"))
+	_form_cell(grid, "Hospital No.", signup_hospno)
 	signup_name = UiTheme.make_line_edit()
-	box.add_child(signup_name)
-
-	box.add_child(UiTheme.make_field_label("Gender"))
+	_form_cell(grid, "Name", signup_name)
 	signup_gender = _option_button(["Male", "Female", "Other"])
-	box.add_child(signup_gender)
-
-	box.add_child(UiTheme.make_field_label("Age"))
+	_form_cell(grid, "Gender", signup_gender)
 	signup_age = UiTheme.make_line_edit()
-	box.add_child(signup_age)
-
-	box.add_child(UiTheme.make_field_label("Diagnosis"))
+	_form_cell(grid, "Age", signup_age)
 	signup_diagnosis = UiTheme.make_line_edit()
-	box.add_child(signup_diagnosis)
-
-	box.add_child(UiTheme.make_field_label("Amputation Side"))
+	_form_cell(grid, "Diagnosis", signup_diagnosis)
 	signup_amp_side = _option_button(["Left", "Right", "N/A"])
-	box.add_child(signup_amp_side)
-
-	box.add_child(UiTheme.make_field_label("Amputation Type"))
+	_form_cell(grid, "Amputation Side", signup_amp_side)
 	signup_amp_type = _option_button(["Transtibial", "Transfemoral", "N/A"])
-	box.add_child(signup_amp_type)
+	_form_cell(grid, "Amputation Type", signup_amp_type)
 
 	var button_row := HBoxContainer.new()
 	button_row.add_theme_constant_override("separation", 12)
+	button_row.alignment = BoxContainer.ALIGNMENT_END
 	box.add_child(button_row)
 
 	var cancel := UiTheme.make_secondary_button("Cancel")
-	cancel.pressed.connect(func(): signup_panel.visible = false)
+	cancel.pressed.connect(_hide_panels)
 	button_row.add_child(cancel)
 
 	var submit := UiTheme.make_primary_button("Submit")
 	submit.pressed.connect(_do_signup)
 	button_row.add_child(submit)
+
+## One form field: caption above the control, half the grid's width.
+func _form_cell(grid: GridContainer, caption: String, field: Control) -> void:
+	var cell := VBoxContainer.new()
+	cell.add_theme_constant_override("separation", 4)
+	cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cell.add_child(UiTheme.make_field_label(caption))
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cell.add_child(field)
+	grid.add_child(cell)
+
+## Shrink the big logo (and hide the tagline) while a form is open, so the
+## form has room; grow it back when the form closes.
+func _set_compact(on: bool) -> void:
+	tagline_label.visible = not on
+	var h := LOGO_H_SMALL if on else LOGO_H_BIG
+	var tw := title_logo.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(title_logo, "custom_minimum_size", Vector2(h * 3.15, h), 0.3)
+
+func _hide_panels() -> void:
+	login_panel.visible = false
+	signup_panel.visible = false
+	_set_compact(false)
 
 func _option_button(options: Array) -> OptionButton:
 	var ob := OptionButton.new()
@@ -158,12 +201,14 @@ func _option_button(options: Array) -> OptionButton:
 
 func _show_login() -> void:
 	signup_panel.visible = false
-	login_panel.visible = true
+	_set_compact(true)
+	UiTheme.pop_in(login_panel)
 	login_hospno.grab_focus()
 
 func _show_signup() -> void:
 	login_panel.visible = false
-	signup_panel.visible = true
+	_set_compact(true)
+	UiTheme.pop_in(signup_panel)
 	signup_hospno.grab_focus()
 
 func _do_login() -> void:
@@ -195,4 +240,4 @@ func _do_signup() -> void:
 		signup_amp_type.get_item_text(signup_amp_type.selected)
 	)
 	UiTheme.set_status(message_label, "sign up complete. You can log in now.", "success")
-	signup_panel.visible = false
+	_hide_panels()

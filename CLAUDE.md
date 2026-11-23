@@ -231,6 +231,66 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
     a moving-average-smoothed combined COP.y (not a flap/jump input), scaled so the patient's AP
     reach (`get_ap_limits()`) spans the full arena height. (Unity reused the ML CSV's `min_gcop_y`
     plus a fixed 15 cm band; replaced at the user's request.)
+  - **Game presentation (2026-11-21):** arenas extend `GameArena` (`scripts/ui/game_arena.gd`:
+    particles, shake, flash, start/game-over banner, REC dot) and draw SVG sprites from
+    `sprites/` (hand-made, original art). Scenes only *tell* the arena about events
+    (`arena.fx_catch()` etc.); hitbox constants (`COLLECTOR_SIZE`, `BIRD_RADIUS`, `PADDLE_SIZE`...)
+    are game logic -- sprites are sized around them, never the reverse. Game screens use the
+    shared `GameHud` layout + `HudChip` readouts (scene still writes `score_label.text`).
+    Weight Shifting is *drawn* as a seesaw (`TiltArena` maps `ball_pos.x / bound.x` onto the
+    plank) because the logical board doesn't fit the arena when rotated.
+  - **Main screen illustration:** `RigPhotoShowcase` (`scripts/ui/rig_photo_showcase.gd`) on the
+    login screen, built from AI-rendered art: `art_src/*.png` (originals, `.gdignore`d) ->
+    `tools/prepare_art.py` (green-screen key, shadow, mark crop) -> `sprites/rig_hero_cut.png`,
+    `sensor_glow_strip.png`, `bg_main.png`. The person leans front/back by mesh-shearing the
+    image above the ankles (anchor pixel coords in the script are for `rig_hero_cut.png` --
+    re-measure if the art changes); rig wobbles; load-cell glows + *simulated* (not live) kg/COP.
+    In the picture the person faces lower-right, so the image-left board is the patient's RIGHT.
+    **Person sway:** `art_src/person_sway_sheet.jpg` (12 frames) -> `prepare_art.py sway_sheet()`
+    -> `sprites/person_sway_strip.png` (frames scaled to the hero, aligned on the front foot) +
+    `sprites/rig_base.png` (hero with the person removed; board holes refilled along the plank
+    grain). The showcase picks the frame whose measured lean (`SWAY_LEAN`, printed by the script)
+    is closest to the simulated lean, so pose and COP numbers agree; frames 11-12 are skipped
+    (body turned toward camera). `tests/sway_frame_probe.tscn` prints the frame chosen over time.
+    Falls back to the code-drawn `RigShowcase` if the PNG is missing. `GameArena.tex()` prefers
+    `<name>.png` over `<name>.svg`, so generated PNGs replace the SVG sprites by name.
+  - **Game art (PNG):** originals in `art_src/`; `tools/prepare_art.py game_sprites()` keys each
+    image's own flat green backdrop by colour distance (so green objects like the marble/grass
+    survive) or black backdrops by brightness (explosion, sparkles), trims, and writes
+    `sprites/`. Sheets: `coin_sheet` 8x1, `bomb_sheet` 6x1, `bird_*_sheet` 4x1 (blue/robin/
+    goldfinch -- `FlappyArena.next_bird()` cycles per trial), `explosion_sheet` 4x3, `sparkle_sheet`
+    / `star_sparkle_sheet` 8x1. Backdrops `bg_coin_*`, `bg_bird_*`, `bg_pong_court` via
+    `GameArena.draw_cover()` / `draw_band()`. Every arena falls back to the SVG/procedural look
+    if a PNG is missing.
+  - **UI kit + logo (generated art):** `tools/prepare_ui_art.py` cuts `art_src/ui_*`, `game_*`,
+    `card_*`, `logo_*` sheets into `sprites/ui/`, `game_ui/`, `cards/`, `logo/` (each cell keyed
+    against its own border colour, generator corner mark dropped, glows de-spilled) and GENERATES
+    `scripts/ui/ui_art_meta.gd` (`UiArtMeta.DATA`: nine-slice margins/expand per texture + logo
+    geometry) -- re-run it after changing any of that art, never hand-edit the meta. `UiTheme`
+    builds buttons/cards/fields as nine-slice `StyleBoxTexture`s from it (`tex_box()`), picks a
+    line icon from each button's label (`_ICON_RULES`), and `style_game_button()` gives game
+    screens chunky pills + game icons (GameHud applies it to every button added to its bar).
+    `HudChip` uses the gold game chip; `GameArena.show_banner(title, sub, badge)` draws the wooden
+    ribbon panel with a bronze/silver/gold medal + confetti. Hub = `GameCard` tiles
+    (`sprites/cards/`). `MobboLogo` (login/hub via `UiTheme.make_app_title()`) animates the logo
+    layers: boards slide/tip in, sensors light, arc draws, COP dot rolls and settles, wordmark
+    wipes in; idle sway. Window/exe icon: `sprites/logo/app_icon.png` / `.ico`. All of it falls
+    back to the flat look if the art is missing.
+  - **Object sizes = collision sizes** (enlarged 2026-11-21 so objects read at fullscreen):
+    `CoinArena` ITEM_RADIUS 22, COLLECTOR_SIZE 150x28 at COLLECTOR_BOTTOM 52; `FlappyArena`
+    BIRD_RADIUS 24, PIPE_WIDTH 60 (+ `PIPE_GAP_HALF` 105 in floppy_bird.gd); `PongArena`
+    PADDLE_SIZE 130x22, BALL_RADIUS 14; `TiltArena.ball_radius` 20. Change art size and
+    hitbox together, never just one. Final screenshots: `tests/screenshots/final/`.
+  - **Sound:** autoload `Sfx` (`scripts/ui/sfx.gd`) plays `sounds/*.wav`, all synthesized by
+    `tools/make_sounds.py` (re-run it to tweak). Arenas' `fx_*` play the effect sounds; each game
+    passes its music loop to `GameHud.build()`. Sound/Music toggles (hub + game screens, M key),
+    saved in `user://sound.cfg`.
+  - **Logic fixes (2026-11-21):** Ping Pong caps sideways ball speed (`MAX_BALL_VX`), uses the
+    ball radius, and can't bounce a ball that's already past a paddle; Floppy Bird collides the
+    bird's body with the pillar's full width (one life per pillar) and derives speed/spawn rate
+    from the level alone (`_apply_level()`); Coin Collector only catches on the frame an item
+    crosses the basket rim; Weight Shifting's tilt smoothing is frame-rate independent.
+    Regression tests: `tests/run_logic_tests.bat` (headless).
   - Game logic uses the arena's real on-screen size (`_area()`), not the `ARENA_SIZE` minimum, so
     the patient's ML reach spans the full (fullscreen) arena width in Ping Pong / Coin Collector.
   - All four read reach limits via `SessionPaths.get_ml_limits()` (new), which parses
@@ -251,6 +311,9 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   Starts fullscreen (F11 toggles, handled in `UiTheme`); base size 1280x720 with
   `canvas_items`/`expand` stretch, so every scene scales to fill the screen — lay scenes out
   with anchors/containers, never hard-coded pixel sizes.
+  `make_background()` also adds `AnimatedBackdrop` (slow drifting glows/dot grid + the screen's
+  entrance fade/stagger), and every `make_*_button()` gets hover/press motion and a click sound,
+  so new screens get both for free.
   Includes a themed `ProgressBar` and `UiTheme.set_status(label, message,
   "error"|"success"|"neutral")` — the one shared status-message convention (color never carries
   meaning alone; text is also prefixed "Error:"/"Success:"). Scenes build their UI in code (no
@@ -271,6 +334,10 @@ boards are **left/right** side-by-side (`Boardno` 0/1, confirmed by the firmware
 stepping detection on hardware that can't produce it. Needs a decision before implementing: either
 reinterpret the "front/back" mechanic as a left-to-right full weight transfer, or treat Stepper as
 needing different/additional hardware and scope it out like the vendored kits.
+
+**Tests in `godot_mobbo/tests/`** (excluded from export; recordings go to `tests/test_data/`,
+git-ignored): `run_logic_tests.bat` (game-logic regressions, headless) and
+`run_ui_screenshots.bat` (windowed; fakes board data, saves every screen to `tests/screenshots/`).
 
 **Testing:** a Godot 4.6 executable is at `D:\Godot_v4.6.2-stable_win64_console.exe` (console
 build — prints to stdout, unlike the windowed one; `project.godot` itself was upgraded in-place to

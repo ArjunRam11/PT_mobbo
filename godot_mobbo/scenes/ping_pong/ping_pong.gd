@@ -15,6 +15,10 @@ const ARENA_SIZE := Vector2(560, 420)
 const BALL_SPEED := 220.0
 const PADDLE_SPEED := 260.0
 const WIN_SCORE := 5
+## Cap on the ball's sideways speed. Each paddle hit adds "english" from
+## where the ball struck the paddle; uncapped, long rallies made the ball
+## ever faster sideways until it was unplayable.
+const MAX_BALL_VX := BALL_SPEED * 1.5
 ## Unity's columns first; then scores and the arena size in px (positions
 ## are px, and the arena size depends on the screen, so divide by it to
 ## compare sessions recorded on different PCs).
@@ -43,53 +47,33 @@ func _ready() -> void:
 	if AppData.session == null:
 		AppData.start_dummy_session()
 
-	theme = UiTheme.theme
-	var bg := UiTheme.make_background()
-	bg.color = UiTheme.COLOR_BACKGROUND
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	var hud := GameHud.build(self, "Ping Pong",
+		"Shift weight left/right to move your paddle (bottom). First to %d wins." % WIN_SCORE, "music_pong")
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 24)
-	add_child(margin)
-
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 14)
-	margin.add_child(root)
-
-	root.add_child(UiTheme.make_heading("Ping Pong"))
-	root.add_child(UiTheme.make_muted_label("Shift weight left/right to move your paddle (bottom). First to 5 wins."))
-
-	var score_row := HBoxContainer.new()
-	score_row.add_theme_constant_override("separation", 24)
-	root.add_child(score_row)
-	player_score_label = UiTheme.make_subheading("You: 0")
-	score_row.add_child(player_score_label)
-	computer_score_label = UiTheme.make_subheading("Computer: 0")
-	score_row.add_child(computer_score_label)
+	var player_chip := HudChip.create("You: 0", "ball")
+	player_score_label = player_chip.label
+	hud.chips.add_child(player_chip)
+	var computer_chip := HudChip.create("Computer: 0")
+	computer_score_label = computer_chip.label
+	hud.chips.add_child(computer_chip)
 
 	arena = PongArena.new()
 	arena.custom_minimum_size = ARENA_SIZE
 	arena.size_flags_vertical = Control.SIZE_EXPAND_FILL  # fill the screen
-	root.add_child(arena)
+	hud.arena_slot.add_child(arena)
 
-	status_label = UiTheme.make_muted_label("")
-	root.add_child(status_label)
-	result_label = UiTheme.make_subheading("")
-	root.add_child(result_label)
+	result_label = GameHud.make_status_label(true)
+	hud.status.add_child(result_label)
+	status_label = GameHud.make_status_label()
+	hud.status.add_child(status_label)
 
-	var button_row := HBoxContainer.new()
-	button_row.add_theme_constant_override("separation", 12)
-	root.add_child(button_row)
 	start_button = UiTheme.make_accent_button("Start Game")
 	start_button.pressed.connect(_on_start_pressed)
-	button_row.add_child(start_button)
+	hud.buttons.add_child(start_button)
 	var back := UiTheme.make_secondary_button("Back to Hub")
 	back.pressed.connect(func(): get_tree().change_scene_to_file(HUB_SCENE))
-	button_row.add_child(back)
+	hud.buttons.add_child(back)
+	arena.show_banner("Ping Pong", "Press Start Game")
 
 	player_x = _area().x * 0.5
 	computer_x = _area().x * 0.5
@@ -120,6 +104,8 @@ func _on_start_pressed() -> void:
 	game_active = true
 	start_button.text = "Restart"
 	UiTheme.set_status(status_label, "game on.", "success")
+	arena.hide_banner()
+	Sfx.play("start")
 
 func _process(delta: float) -> void:
 	var limits := SessionPaths.get_ml_limits()
@@ -128,6 +114,7 @@ func _process(delta: float) -> void:
 		var t: float = (cop.x - limits.left) / (limits.right - limits.left)
 		player_x = clamp(t, 0.0, 1.0) * _area().x
 
+	arena.recording = game_active
 	if not game_active:
 		arena.set_state(player_x, computer_x, ball_pos)
 		return
@@ -138,27 +125,42 @@ func _process(delta: float) -> void:
 	computer_x = clamp(computer_x, 0.0, _area().x)
 
 	ball_pos += ball_vel * delta
-	if ball_pos.x <= 0.0 or ball_pos.x >= _area().x:
-		ball_pos.x = clamp(ball_pos.x, 0.0, _area().x)
+	# Side walls bounce at the ball's edge, not its centre (it used to sink
+	# half into the wall). Only flip when moving into the wall, so a ball
+	# clamped to the edge can't flip back and forth.
+	var br := PongArena.BALL_RADIUS
+	if (ball_pos.x <= br and ball_vel.x < 0.0) or (ball_pos.x >= _area().x - br and ball_vel.x > 0.0):
+		ball_pos.x = clamp(ball_pos.x, br, _area().x - br)
 		ball_vel.x *= -1.0
+		arena.fx_wall(ball_pos)
 
+	# Paddle hits use the ball's radius, and only count while the ball is
+	# still at the paddle's face: a ball that has already gone past a
+	# paddle can no longer be "hit" back from behind it by sliding the
+	# paddle underneath (it used to be).
 	var paddle_half := PongArena.PADDLE_SIZE * 0.5
 	var player_y := _area().y - 20.0
 	var computer_y := 20.0
-	if ball_vel.y > 0.0 and ball_pos.y >= player_y - paddle_half.y and abs(ball_pos.x - player_x) <= paddle_half.x:
+	if ball_vel.y > 0.0 and ball_pos.y + br >= player_y - paddle_half.y and ball_pos.y <= player_y + paddle_half.y 			and abs(ball_pos.x - player_x) <= paddle_half.x + br:
 		ball_vel.y = -abs(ball_vel.y)
-		ball_vel.x += (ball_pos.x - player_x) * 2.0
-	elif ball_vel.y < 0.0 and ball_pos.y <= computer_y + paddle_half.y and abs(ball_pos.x - computer_x) <= paddle_half.x:
+		ball_vel.x = clamp(ball_vel.x + (ball_pos.x - player_x) * 2.0, -MAX_BALL_VX, MAX_BALL_VX)
+		ball_pos.y = player_y - paddle_half.y - br  # out of the paddle
+		arena.fx_paddle(ball_pos, true)
+	elif ball_vel.y < 0.0 and ball_pos.y - br <= computer_y + paddle_half.y and ball_pos.y >= computer_y - paddle_half.y 			and abs(ball_pos.x - computer_x) <= paddle_half.x + br:
 		ball_vel.y = abs(ball_vel.y)
-		ball_vel.x += (ball_pos.x - computer_x) * 2.0
+		ball_vel.x = clamp(ball_vel.x + (ball_pos.x - computer_x) * 2.0, -MAX_BALL_VX, MAX_BALL_VX)
+		ball_pos.y = computer_y + paddle_half.y + br
+		arena.fx_paddle(ball_pos, false)
 
 	if ball_pos.y < 0.0:
 		player_score += 1
 		player_score_label.text = "You: %d" % player_score
+		arena.fx_point(true)
 		_after_point()
 	elif ball_pos.y > _area().y:
 		computer_score += 1
 		computer_score_label.text = "Computer: %d" % computer_score
+		arena.fx_point(false)
 		_after_point()
 
 	# Game-state row every 0.1 s (10 Hz), as Unity did.
@@ -178,6 +180,10 @@ func _after_point() -> void:
 		result_label.text = "YOU WIN" if player_score >= WIN_SCORE else "COMPUTER WINS"
 		UiTheme.set_status(status_label, "game over. Data saved.", "neutral")
 		recorder.stop("finished %d-%d" % [player_score, computer_score])
+		arena.show_banner("You win!" if player_score >= WIN_SCORE else "Computer wins",
+			"%d - %d  -  press Restart" % [player_score, computer_score],
+			"gold" if player_score >= WIN_SCORE else "")
+		Sfx.play("win" if player_score >= WIN_SCORE else "game_over")
 	else:
 		_reset_ball()
 

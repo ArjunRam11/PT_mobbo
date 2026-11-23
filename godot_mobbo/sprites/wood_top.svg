@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="p1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c98a4b"/>
+      <stop offset="0.5" stop-color="#dca068"/>
+      <stop offset="1" stop-color="#c4844a"/>
+    </linearGradient>
+    <linearGradient id="p2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b9783e"/>
+      <stop offset="0.5" stop-color="#d09257"/>
+      <stop offset="1" stop-color="#b57541"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <!-- four planks running front-to-back -->
+  <rect x="0" y="0" width="64" height="256" fill="url(#p1)"/>
+  <rect x="64" y="0" width="64" height="256" fill="url(#p2)"/>
+  <rect x="128" y="0" width="64" height="256" fill="url(#p1)"/>
+  <rect x="192" y="0" width="64" height="256" fill="url(#p2)"/>
+  <g fill="none" stroke="#8a5428" stroke-linecap="round" opacity="0.55">
+    <path d="M14 0 C18 60 8 120 16 180 S12 240 15 256" stroke-width="1.6"/>
+    <path d="M34 0 C30 70 40 130 33 190 S37 240 35 256" stroke-width="1.2"/>
+    <path d="M50 0 C54 50 46 110 52 170 S48 230 51 256" stroke-width="1"/>
+    <path d="M80 0 C76 80 86 140 79 200 S83 245 81 256" stroke-width="1.5"/>
+    <path d="M100 0 C104 40 96 100 102 160 S98 220 101 256" stroke-width="1.1"/>
+    <path d="M118 0 C114 60 120 120 116 180 S120 240 117 256" stroke-width="1"/>
+    <path d="M146 0 C150 70 140 130 148 190 S144 240 147 256" stroke-width="1.5"/>
+    <path d="M168 0 C164 50 174 110 166 170 S170 230 167 256" stroke-width="1.2"/>
+    <path d="M184 0 C188 80 180 140 186 200 S182 245 185 256" stroke-width="1"/>
+    <path d="M210 0 C206 60 216 120 209 180 S213 240 211 256" stroke-width="1.6"/>
+    <path d="M232 0 C236 40 228 100 234 160 S230 220 233 256" stroke-width="1.1"/>
+  </g>
+  <!-- knots -->
+  <g fill="none" stroke="#7a4820" opacity="0.6">
+    <ellipse cx="42" cy="150" rx="5" ry="11" stroke-width="1.6"/>
+    <ellipse cx="42" cy="150" rx="2" ry="5" stroke-width="1.2"/>
+    <ellipse cx="172" cy="70" rx="4" ry="9" stroke-width="1.5"/>
+    <ellipse cx="226" cy="205" rx="4" ry="8" stroke-width="1.4"/>
+  </g>
+  <!-- plank joints -->
+  <g stroke="#6b3d1a" stroke-width="2.5" opacity="0.8">
+    <line x1="64" y1="0" x2="64" y2="256"/>
+    <line x1="128" y1="0" x2="128" y2="256"/>
+    <line x1="192" y1="0" x2="192" y2="256"/>
+  </g>
+  <rect width="256" height="256" fill="url(#sheen)"/>
+</svg>

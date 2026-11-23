@@ -162,32 +162,141 @@ func _outline_styles(base: Color, hover: Color) -> Dictionary:
 func _apply_styles_to_theme(t: Theme, theme_type: String, s: Dictionary) -> void:
 	for key in ["normal", "hover", "pressed"]:
 		t.set_stylebox(key, theme_type, s[key])
-	t.set_stylebox("disabled", theme_type, _flat_box(COLOR_DISABLED_BG, COLOR_BORDER, 1))
+	t.set_stylebox("disabled", theme_type, s.get("disabled", _flat_box(COLOR_DISABLED_BG, COLOR_BORDER, 1)))
 	t.set_stylebox("focus", theme_type, _focus_ring_box())
 	for key in ["font_color", "font_hover_color", "font_pressed_color"]:
 		t.set_color(key, theme_type, s[key])
 	t.set_color("font_focus_color", theme_type, s.font_color)
 	t.set_color("font_hover_pressed_color", theme_type, s.font_pressed_color)
 	t.set_color("font_disabled_color", theme_type, COLOR_DISABLED_TEXT)
+	# Icons follow the text colour (white line icons get tinted to match).
+	t.set_color("icon_normal_color", theme_type, s.font_color)
+	t.set_color("icon_hover_color", theme_type, s.font_hover_color)
+	t.set_color("icon_pressed_color", theme_type, s.font_pressed_color)
+	t.set_color("icon_focus_color", theme_type, s.font_color)
+	t.set_color("icon_hover_pressed_color", theme_type, s.font_pressed_color)
+	t.set_color("icon_disabled_color", theme_type, COLOR_DISABLED_TEXT)
 	t.set_font("font", theme_type, font_medium)
 	t.set_font_size("font_size", theme_type, FONT_SIZE_BUTTON)
 	t.set_constant("outline_size", theme_type, 0)
 
 func _apply_styles_to_button(b: Button, s: Dictionary) -> void:
-	for key in ["normal", "hover", "pressed"]:
-		b.add_theme_stylebox_override(key, s[key])
+	for key in ["normal", "hover", "pressed", "disabled"]:
+		if s.has(key):
+			b.add_theme_stylebox_override(key, s[key])
 	for key in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(key, s[key])
 	b.add_theme_color_override("font_focus_color", s.font_color)
 	b.add_theme_color_override("font_hover_pressed_color", s.font_pressed_color)
+	b.add_theme_color_override("icon_normal_color", s.font_color)
+	b.add_theme_color_override("icon_hover_color", s.font_hover_color)
+	b.add_theme_color_override("icon_pressed_color", s.font_pressed_color)
+	b.add_theme_color_override("icon_focus_color", s.font_color)
+	b.add_theme_color_override("icon_hover_pressed_color", s.font_pressed_color)
+
+## -- Generated art (sprites/ui, sprites/game_ui + UiArtMeta) -------------------
+## Buttons, cards and fields use the generated textures as nine-slice styles
+## when present; every helper falls back to the flat look when they're not.
+
+func has_art(key: String) -> bool:
+	return UiArtMeta.DATA.has(key) and GameArena.tex(key) != null
+
+## Nine-slice StyleBoxTexture. `content` = text padding (left, top, right, bottom).
+func tex_box(key: String, content: Vector4 = Vector4(16, 6, 16, 6)) -> StyleBoxTexture:
+	var m: Dictionary = UiArtMeta.DATA[key]
+	var sb := StyleBoxTexture.new()
+	sb.texture = GameArena.tex(key)
+	sb.texture_margin_left = m.margin[0]
+	sb.texture_margin_top = m.margin[1]
+	sb.texture_margin_right = m.margin[2]
+	sb.texture_margin_bottom = m.margin[3]
+	sb.expand_margin_left = m.expand[0]
+	sb.expand_margin_top = m.expand[1]
+	sb.expand_margin_right = m.expand[2]
+	sb.expand_margin_bottom = m.expand[3]
+	sb.content_margin_left = content.x
+	sb.content_margin_top = content.y
+	sb.content_margin_right = content.z
+	sb.content_margin_bottom = content.w
+	return sb
+
+## {} when the art for `prefix` (e.g. "ui/btn_accent") isn't there.
+func _tex_button_styles(prefix: String, on_color: Color, hover_color: Color = Color(0, 0, 0, 0),
+		content: Vector4 = Vector4(16, 6, 16, 6)) -> Dictionary:
+	if not has_art(prefix + "_normal"):
+		return {}
+	var hc := on_color if hover_color.a == 0.0 else hover_color
+	var s := {
+		"normal": tex_box(prefix + "_normal", content), "hover": tex_box(prefix + "_hover", content),
+		"pressed": tex_box(prefix + "_pressed", content),
+		"font_color": on_color, "font_hover_color": hc, "font_pressed_color": hc,
+	}
+	if has_art(prefix + "_disabled"):
+		s["disabled"] = tex_box(prefix + "_disabled", content)
+	return s
+
+## Line icon for a button, picked from its label (first match wins).
+const _ICON_RULES := [
+	["log out", "logout"], ["logout", "logout"], ["log in", "login"], ["login", "login"],
+	["sign up", "signup"], ["exit", "power"], ["back", "back"], ["auto connect", "usb"],
+	["disconnect", "plug"], ["connect", "plug"], ["diagnostic", "diagnostics"], ["refresh", "refresh"],
+	["restart", "refresh"], ["start rec", "record"], ["stop", "stop"], ["start", "play"],
+	["save", "save"], ["level up", "level_up"], ["level down", "level_down"],
+	["sound", "sound_on"], ["music", "music_on"], ["analysis", "chart"], ["report", "report"],
+	["live", "assessment"], ["browse", "folder"], ["capture", "target"], ["trial", "timer"],
+]
+
+func _auto_icon(b: Button) -> void:
+	var low := b.text.to_lower()
+	for r in _ICON_RULES:
+		if low.contains(r[0]):
+			var tx := GameArena.tex("ui/icon_" + r[1])
+			if tx != null:
+				b.icon = tx
+			return
+
+## Game-screen buttons: chunky glossy pills (sprites/game_ui/btn_<colour>_*),
+## white bold label, full-colour game icon. colour "" = from the button's
+## variant (accent/primary -> green, secondary -> blue, danger -> red).
+const _GAME_ICON_RULES := [
+	["restart", "restart"], ["start rec", "play"], ["start", "play"], ["stop", "pause"],
+	["back", "home"], ["sound", "sound_on"], ["music", "music"], ["level", "level"],
+]
+
+func style_game_button(b: Button, colour: String = "") -> void:
+	if colour == "":
+		colour = {"accent": "green", "primary": "green", "secondary": "blue", "danger": "red"}.get(b.get_meta("variant", "primary"), "blue")
+	var s := _tex_button_styles("game_ui/btn_" + colour, Color.WHITE, Color.WHITE, Vector4(22, 6, 24, 10))
+	if s.is_empty():
+		return
+	_apply_styles_to_button(b, s)
+	for key in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color", "icon_hover_pressed_color"]:
+		b.add_theme_color_override(key, Color.WHITE)
+	b.add_theme_font_override("font", font_heading)
+	b.add_theme_font_size_override("font_size", 17)
+	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
+	b.add_theme_constant_override("outline_size", 6)
+	b.add_theme_constant_override("icon_max_width", 26)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.custom_minimum_size.y = maxf(b.custom_minimum_size.y, 54.0)
+	var low := b.text.to_lower()
+	for r in _GAME_ICON_RULES:
+		if low.contains(r[0]):
+			var tx := GameArena.tex("game_ui/icon_" + r[1])
+			if tx != null:
+				b.icon = tx
+			break
 
 func _build_theme() -> Theme:
 	var t := Theme.new()
 	t.default_font = font_regular
 	t.default_font_size = FONT_SIZE_BASE
 
-	# Primary (default) buttons: solid green.
-	_apply_styles_to_theme(t, "Button", _solid_styles(COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED, COLOR_ON_PRIMARY))
+	# Primary (default) buttons: green (textured when the art is present).
+	var prim := _tex_button_styles("ui/btn_primary", COLOR_ON_PRIMARY)
+	_apply_styles_to_theme(t, "Button", prim if not prim.is_empty() else _solid_styles(COLOR_PRIMARY, COLOR_PRIMARY_HOVER, COLOR_PRIMARY_PRESSED, COLOR_ON_PRIMARY))
+	t.set_constant("icon_max_width", "Button", 18)
+	t.set_constant("h_separation", "Button", 8)
 	# Dropdowns / checkboxes: quiet dark controls.
 	var quiet := _outline_styles(COLOR_TEXT, COLOR_TEXT)
 	quiet.normal = _flat_box(COLOR_SURFACE_RAISED, COLOR_BORDER, 1)
@@ -204,16 +313,24 @@ func _build_theme() -> Theme:
 	t.set_font_size("font_size", "Label", FONT_SIZE_BASE)
 
 	# Cards: lifted dark surface, hairline border (like the chart panel).
-	var card := _flat_box(COLOR_SURFACE, COLOR_BORDER, 1)
-	card.content_margin_left = 20
-	card.content_margin_right = 20
-	card.content_margin_top = 16
-	card.content_margin_bottom = 16
+	var card: StyleBox
+	if has_art("ui/card_plain"):
+		card = tex_box("ui/card_plain", Vector4(20, 16, 20, 16))
+	else:
+		card = _flat_box(COLOR_SURFACE, COLOR_BORDER, 1)
+		card.content_margin_left = 20
+		card.content_margin_right = 20
+		card.content_margin_top = 16
+		card.content_margin_bottom = 16
 	t.set_stylebox("panel", "PanelContainer", card)
 	t.set_stylebox("panel", "Panel", card)
 
-	t.set_stylebox("normal", "LineEdit", _flat_box(COLOR_SURFACE, COLOR_BORDER, 1))
-	t.set_stylebox("focus", "LineEdit", _flat_box(COLOR_SURFACE, COLOR_FOCUS_RING, FOCUS_RING_WIDTH))
+	if has_art("ui/field_normal"):
+		t.set_stylebox("normal", "LineEdit", tex_box("ui/field_normal", Vector4(12, 6, 12, 6)))
+		t.set_stylebox("focus", "LineEdit", tex_box("ui/field_focus", Vector4(12, 6, 12, 6)))
+	else:
+		t.set_stylebox("normal", "LineEdit", _flat_box(COLOR_SURFACE, COLOR_BORDER, 1))
+		t.set_stylebox("focus", "LineEdit", _flat_box(COLOR_SURFACE, COLOR_FOCUS_RING, FOCUS_RING_WIDTH))
 	t.set_color("font_color", "LineEdit", COLOR_TEXT)
 	t.set_color("font_placeholder_color", "LineEdit", COLOR_MUTED_TEXT)
 	t.set_color("caret_color", "LineEdit", COLOR_TEXT)
@@ -281,11 +398,97 @@ func _radio_icon(color: Color, on: bool) -> ImageTexture:
 
 ## -- Helpers scenes call when building nodes in code ---------------------------
 
-## Full-screen plain black backdrop.
-func make_background() -> ColorRect:
+## Full-screen near-black backdrop with the slow animated layer
+## (AnimatedBackdrop: drifting glows, dot grid, motes) and the screen's
+## entrance animation. Callers still set color/anchors as before.
+## image_name: optional sprite (res://sprites/<name>.png) used as a photo
+## backdrop under the animated layer, e.g. "bg_main" on the main screen.
+func make_background(image_name: String = "") -> ColorRect:
 	var bg := ColorRect.new()
 	bg.color = COLOR_BACKGROUND
+	var fx := AnimatedBackdrop.new()
+	if image_name != "":
+		fx.image = GameArena.tex(image_name)
+	fx.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.add_child(fx)
 	return bg
+
+## -- Motion helpers ---------------------------------------------------------------
+
+## Fade a control in (and slide it up by `slide` px if it isn't laid out by
+## a container -- containers would overwrite the position).
+func fade_in(c: Control, delay: float = 0.0, slide: float = 0.0, time: float = 0.4) -> void:
+	c.modulate.a = 0.0
+	var tw := c.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(c, "modulate:a", 1.0, time).set_delay(delay)
+	if slide != 0.0 and not (c.get_parent() is Container):
+		var target := c.position
+		c.position = target + Vector2(0, slide)
+		tw.parallel().tween_property(c, "position", target, time + 0.1).set_delay(delay)
+
+## Show a control with a small scale pop (for panels that toggle visible).
+func pop_in(c: Control) -> void:
+	c.visible = true
+	c.pivot_offset = c.size * 0.5
+	c.modulate.a = 0.0
+	c.scale = Vector2(0.96, 0.96)
+	var tw := c.create_tween().set_parallel().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(c, "modulate:a", 1.0, 0.22)
+	tw.tween_property(c, "scale", Vector2.ONE, 0.3)
+
+func _tween_scale(b: Control, s: float) -> void:
+	if b is BaseButton and b.disabled and s > 1.0:
+		return
+	b.pivot_offset = b.size * 0.5
+	var old: Tween = b.get_meta("_scale_tween") if b.has_meta("_scale_tween") else null
+	if old != null and old.is_valid():
+		old.kill()
+	var tw := b.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(b, "scale", Vector2(s, s), 0.14)
+	b.set_meta("_scale_tween", tw)
+
+## Hover lift, press squash, click sound -- applied to every themed button.
+func _add_button_motion(b: Button) -> void:
+	b.mouse_entered.connect(func(): _tween_scale(b, 1.04))
+	b.mouse_exited.connect(func(): _tween_scale(b, 1.0))
+	b.button_down.connect(func(): _tween_scale(b, 0.95))
+	b.button_up.connect(func(): _tween_scale(b, 1.04 if b.is_hovered() else 1.0))
+	b.pressed.connect(func(): Sfx.play("ui_click", -2.0))
+
+## "Sound: On" / "Music: On" toggle buttons (state lives in Sfx).
+## game = true: chunky game-style buttons with the colourful game icons.
+func make_sound_toggles(game: bool = false) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var sound_btn := make_secondary_button("Sound")
+	var music_btn := make_secondary_button("Music")
+	if game:
+		style_game_button(sound_btn, "blue")
+		style_game_button(music_btn, "blue")
+	sound_btn.tooltip_text = "All sounds on/off (M key)"
+	music_btn.tooltip_text = "Background music on/off"
+	var set_icon := func(b: Button, ui_name: String, game_name: String):
+		var tx := GameArena.tex(("game_ui/icon_" + game_name) if game else ("ui/icon_" + ui_name))
+		if tx != null:
+			b.icon = tx
+	var refresh := func():
+		sound_btn.text = "Sound: %s" % ("On" if Sfx.sound_on else "Off")
+		music_btn.text = "Music: %s" % ("On" if Sfx.music_on else "Off")
+		music_btn.disabled = not Sfx.sound_on
+		set_icon.call(sound_btn, "sound_on" if Sfx.sound_on else "sound_off", "sound_on" if Sfx.sound_on else "sound_off")
+		set_icon.call(music_btn, "music_on" if Sfx.music_on else "music_off", "music")
+	refresh.call()
+	sound_btn.pressed.connect(func(): Sfx.set_sound_on(not Sfx.sound_on))
+	music_btn.pressed.connect(func(): Sfx.set_music_on(not Sfx.music_on))
+	Sfx.settings_changed.connect(refresh)
+	# Disconnect when the buttons go away (Sfx outlives every scene).
+	row.tree_exiting.connect(func():
+		if Sfx.settings_changed.is_connected(refresh):
+			Sfx.settings_changed.disconnect(refresh))
+	row.add_child(sound_btn)
+	row.add_child(music_btn)
+	return row
 
 func make_primary_button(text: String) -> Button:
 	var b := Button.new()
@@ -294,16 +497,23 @@ func make_primary_button(text: String) -> Button:
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	# Size to the label instead of stretching across a VBox / screen.
 	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	b.set_meta("variant", "primary")
+	_add_button_motion(b)
+	_auto_icon(b)
 	return b
 
 func make_accent_button(text: String) -> Button:
 	var b := make_primary_button(text)
-	_apply_styles_to_button(b, _solid_styles(COLOR_ACCENT, COLOR_ACCENT_HOVER, COLOR_ACCENT, COLOR_ON_ACCENT))
+	var s := _tex_button_styles("ui/btn_accent", COLOR_ON_ACCENT)
+	_apply_styles_to_button(b, s if not s.is_empty() else _solid_styles(COLOR_ACCENT, COLOR_ACCENT_HOVER, COLOR_ACCENT, COLOR_ON_ACCENT))
+	b.set_meta("variant", "accent")
 	return b
 
 func make_destructive_button(text: String) -> Button:
 	var b := make_primary_button(text)
-	_apply_styles_to_button(b, _outline_styles(COLOR_DESTRUCTIVE, COLOR_DESTRUCTIVE_HOVER))
+	var s := _tex_button_styles("ui/btn_danger", COLOR_DESTRUCTIVE, COLOR_DESTRUCTIVE_HOVER)
+	_apply_styles_to_button(b, s if not s.is_empty() else _outline_styles(COLOR_DESTRUCTIVE, COLOR_DESTRUCTIVE_HOVER))
+	b.set_meta("variant", "danger")
 	return b
 
 ## Visually subordinate to make_primary_button -- for Cancel/Back, never for
@@ -314,7 +524,9 @@ func make_secondary_button(text: String) -> Button:
 	s.normal = _flat_box(COLOR_SURFACE_RAISED, COLOR_BORDER, 1)
 	s.hover = _flat_box(Color("26262b"), Color("3a3a42"), 1)
 	s.pressed = _flat_box(Color("2e2e34"), Color("3a3a42"), 1)
-	_apply_styles_to_button(b, s)
+	var ts := _tex_button_styles("ui/btn_secondary", COLOR_TEXT)
+	_apply_styles_to_button(b, ts if not ts.is_empty() else s)
+	b.set_meta("variant", "secondary")
 	return b
 
 func make_line_edit(placeholder: String = "") -> LineEdit:
@@ -343,9 +555,15 @@ func make_heading(text: String) -> Label:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return l
 
-## App title block for login/hub: big "MoBBo" with "Modular Balance Board"
-## under it.
-func make_app_title() -> VBoxContainer:
+## App title block for login/hub: the animated logo (MobboLogo: mark +
+## wordmark) when the logo art is present, else big "MoBBo" text with
+## "Modular Balance Board" under it.
+func make_app_title(logo_height: float = 190.0) -> Control:
+	if MobboLogo.available():
+		var logo := MobboLogo.new()
+		logo.custom_minimum_size = Vector2(logo_height * 3.15, logo_height)
+		logo.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		return logo
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 0)
 	var name_label := make_heading("MoBBo")
