@@ -52,9 +52,9 @@ func _ready() -> void:
     left.custom_minimum_size = UiTheme.MIN_TOUCH_SIZE
     right = OptionButton.new()
     right.custom_minimum_size = UiTheme.MIN_TOUCH_SIZE
-    row.add_child(UiTheme.make_field_label("Board A (left)"))
+    row.add_child(UiTheme.make_field_label("Board A (%s)" % BoardData.board_name("left")))
     row.add_child(left)
-    row.add_child(UiTheme.make_field_label("Board B (right)"))
+    row.add_child(UiTheme.make_field_label("Board B (%s)" % BoardData.board_name("right")))
     row.add_child(right)
 
     var action_row := HBoxContainer.new()
@@ -73,8 +73,8 @@ func _ready() -> void:
     disconnect_button.pressed.connect(func(): SerialLink.disconnect_boards())
     action_row.add_child(disconnect_button)
 
-    left_data = UiTheme.make_subheading("Left board: waiting for data")
-    right_data = UiTheme.make_subheading("Right board: waiting for data")
+    left_data = UiTheme.make_subheading("%s: waiting for data" % BoardData.board_title("left"))
+    right_data = UiTheme.make_subheading("%s: waiting for data" % BoardData.board_title("right"))
     panel.add_child(left_data)
     panel.add_child(right_data)
     var tare_hint := UiTheme.make_field_label("Keep both boards unloaded while connecting: the first 20 samples per board are used for tare. Values are in kg.")
@@ -84,9 +84,9 @@ func _ready() -> void:
     panel.add_child(UiTheme.make_subheading("Raw ADC readings (counts)"))
     adc_status = UiTheme.make_field_label("Waiting for board data")
     panel.add_child(adc_status)
-    panel.add_child(UiTheme.make_field_label("Left board"))
+    panel.add_child(UiTheme.make_field_label(BoardData.board_title("left")))
     panel.add_child(_make_adc_row(left_adc_labels))
-    panel.add_child(UiTheme.make_field_label("Right board"))
+    panel.add_child(UiTheme.make_field_label(BoardData.board_title("right")))
     panel.add_child(_make_adc_row(right_adc_labels))
 
     var back := UiTheme.make_secondary_button("Back to Hub")
@@ -129,8 +129,8 @@ func _on_board_updated(_side: String) -> void:
     _refresh_readouts()
 
 func _refresh_readouts() -> void:
-    left_data.text = _board_line("Left", SerialLink.left_forces()) if SerialLink.has_left_data() else "Left board: waiting for data"
-    right_data.text = _board_line("Right", SerialLink.right_forces()) if SerialLink.has_right_data() else "Right board: waiting for data"
+    left_data.text = _board_line(BoardData.board_name("left").capitalize(), SerialLink.left_forces()) if SerialLink.has_left_data() else "%s: waiting for data" % BoardData.board_title("left")
+    right_data.text = _board_line(BoardData.board_name("right").capitalize(), SerialLink.right_forces()) if SerialLink.has_right_data() else "%s: waiting for data" % BoardData.board_title("right")
     _update_adc_row(left_adc_labels, SerialLink.left_adc)
     _update_adc_row(right_adc_labels, SerialLink.right_adc)
 

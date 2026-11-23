@@ -231,7 +231,18 @@ func _collect_tare(side: String, adc: Array) -> void:
 			BoardData.left_tare_adc = tare
 		else:
 			BoardData.right_tare_adc = tare
-		status_changed.emit("Tare complete for %s board; keep both boards unloaded until both are ready." % side)
+		status_changed.emit("Tare complete for %s board; keep both boards unloaded until both are ready." % BoardData.board_name(side))
+
+## Re-zero both boards now (boards must be empty): the next TARE_SAMPLES
+## packets per board become the new tare. Readings pause until it's done.
+func retare() -> void:
+	_left_tare_sum = [0.0, 0.0, 0.0, 0.0]
+	_right_tare_sum = [0.0, 0.0, 0.0, 0.0]
+	_left_tare_count = 0
+	_right_tare_count = 0
+	BoardData.left_tare_adc = []
+	BoardData.right_tare_adc = []
+	status_changed.emit("Re-zeroing: keep both boards empty...")
 
 func _reset_boards() -> void:
 	left_adc = []
@@ -347,12 +358,12 @@ func _check_auto_connect() -> void:
 		error.emit("Auto connect: two boards report the same boardno. Reflash one so left = 0 and right = 1.")
 		auto_connect_finished.emit(false, lp, rp)
 	elif lp != "" and rp != "":
-		status_changed.emit("Auto connected: left board on %s, right board on %s. Keep both unloaded for tare." % [lp, rp])
+		status_changed.emit("Auto connected: %s board on %s, %s board on %s. Keep both unloaded for tare." % [BoardData.board_name("left"), lp, BoardData.board_name("right"), rp])
 		auto_connect_finished.emit(true, lp, rp)
 	else:
 		var missing := []
-		if lp == "": missing.append("left (boardno 0)")
-		if rp == "": missing.append("right (boardno 1)")
+		if lp == "": missing.append("%s (boardno 0)" % BoardData.board_name("left"))
+		if rp == "": missing.append("%s (boardno 1)" % BoardData.board_name("right"))
 		error.emit("Auto connect: %s board not found. Check its USB cable and firmware." % " and ".join(missing))
 		auto_connect_finished.emit(false, lp, rp)
 

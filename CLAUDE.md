@@ -142,6 +142,25 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   zero-phase) before all COP measures; forces/weight % unfiltered. Combined COP is sampled once per
   left packet paired with the latest right packet. Verified against synthetic data with known
   answers. Reads old-format raw files too (recomputes COP from f1..f4).
+- **MoBBo Setup scene** (`scenes/mobbo_setup/`, hub button "MoBBo Setup"; was the "Board Setup /
+  Test" placeholder). Saved per PC in `MoBBo_Data/data/config/rig.cfg` (`BoardData.load/
+  save_rig_config`).
+  - **Board layout** tab: Left/Right (default — everything behaves exactly as before) or
+    Top/Bottom (boardno 0 = top/front, 1 = bottom/behind; board 1 at (0, −(27.6+gap)) instead of
+    (56.2+gap, 0)), plus the gap between boards. Board slots stay `"left"` (board 0) / `"right"`
+    (board 1) in all code; `BoardData.board_name()/board_title()` give the display names,
+    `right_board_offset` is computed by `_update_offset()`, `combined_bounds()` gives the rig rect.
+    Top/Bottom uses its own reach files (`SessionPaths.reach_file()` → `min_max_dist_{ml,ap}_tb.csv`)
+    so a left/right range never scales a top/bottom game; raw logs write `top`/`bottom` in the side
+    column; `CopAnalysis` takes the layout + offset from the FILE (side names + that session's
+    `session_info.csv`), not the current setting. Weight Shifting in Top/Bottom tilts by left-side
+    sensors (1,4) vs right-side (2,3) of both boards.
+  - **Calibration** tab: Zero (`SerialLink.retare()`), then capture a known weight (1.5 s average of
+    ADC − tare) at several places on one board; `Calibration.solve()` does per-sensor least squares
+    (sum d_i·g_i = W) with 4+ separated points, else one overall scale; rejects per-sensor results
+    that flip sign or change > 50 %. Apply → `BoardData.set_calibration()` (gains used by
+    `forces_from_raw`, saved, written to every `session_info.csv`). Verified: recovers simulated
+    true gains to 0.01 %.
 - **Deploying to another PC**: `export_presets.cfg` (Windows Desktop → `../build/MoBBo.exe`, excludes
   stray data files). Needs Godot 4.5.1 export templates installed. Ship the exe **with**
   `gdserial.dll` next to it (export copies it). The DLL is built with a static C runtime so no
@@ -240,7 +259,7 @@ The app's entry point is `scenes/login/login.tscn` (`project.godot`'s `run/main_
   touch targets, spacing, and color semantics (primary/accent/destructive/secondary) stay
   consistent across every screen.
 
-**Not started:** stepper (blocked — see below), board setup/test, and user info.
+**Not started:** stepper (blocked — see below — though the Top/Bottom layout in MoBBo Setup now provides the front/back board arrangement it needs), and user info.
 `_CrashyRacing`/`Space Shooter` are out of scope entirely (not just deferred). `AppConfig`/the UDP
 `MoBBoGrid` layer still aren't exercised by any real scene.
 

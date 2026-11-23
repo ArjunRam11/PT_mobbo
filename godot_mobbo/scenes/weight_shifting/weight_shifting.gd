@@ -112,8 +112,15 @@ func _decrement_level() -> void:
 	level_label.text = "Level: %d" % level
 
 func _process(delta: float) -> void:
-	var left_w := BoardData.total_weight(SerialLink.left_forces())
-	var right_w := BoardData.total_weight(SerialLink.right_forces())
+	var lf := SerialLink.left_forces()
+	var rf := SerialLink.right_forces()
+	var left_w := BoardData.total_weight(lf)
+	var right_w := BoardData.total_weight(rf)
+	if BoardData.is_top_bottom():
+		# No left/right board in this layout: use the left-side sensors
+		# (1 front-left, 4 back-left) vs right-side sensors (2, 3) of both.
+		left_w = lf[0] + lf[3] + rf[0] + rf[3]
+		right_w = lf[1] + lf[2] + rf[1] + rf[2]
 	var diff: float = clamp(right_w - left_w, -100.0, 100.0)
 	var target_tilt_deg: float = (diff / 100.0) * MAX_TILT_DEG
 	current_tilt_deg = lerp(current_tilt_deg, target_tilt_deg, delta * TILT_LERP_SPEED)

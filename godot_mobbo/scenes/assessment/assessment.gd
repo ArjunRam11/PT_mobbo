@@ -314,8 +314,10 @@ func _build_trial_section(parent: Control) -> void:
 
 func _connection_text() -> String:
 	if SerialLink.left_port != "" or SerialLink.right_port != "":
-		return "Left: %s   ·   Right: %s" % [
+		return "%s: %s   ·   %s: %s" % [
+			BoardData.board_name("left").capitalize(),
 			SerialLink.left_port if SerialLink.left_port != "" else "not found",
+			BoardData.board_name("right").capitalize(),
 			SerialLink.right_port if SerialLink.right_port != "" else "not found",
 		]
 	return "Boards not connected. Press Auto connect with both boards unloaded."
@@ -381,7 +383,7 @@ func _refresh_live() -> void:
 	elif c_cop == null:
 		combined_label.text = "Combined COP: below %.0f kg" % COP_MIN_WEIGHT
 	else:
-		combined_label.text = "Combined COP (left-board origin): (%.1f, %.1f) cm" % [c_cop.x, c_cop.y]
+		combined_label.text = "Combined COP (%s-board origin): (%.1f, %.1f) cm" % [BoardData.board_name("left"), c_cop.x, c_cop.y]
 
 	_sample_reach(lf, rf, has_l, has_r)
 	weight_chart.set_values(left_w, right_w, has_l, has_r)
@@ -482,14 +484,14 @@ func _ml_fields(s: Dictionary, lean_side: String) -> String:
 	]
 
 func _write_ml_csv(mn: Dictionary, mx: Dictionary) -> bool:
-	return _append_csv("min_max_dist_ml.csv", ML_CSV_HEADER,
+	return _append_csv(SessionPaths.reach_file("ml"), ML_CSV_HEADER,
 		"%s, %s" % [_ml_fields(mn, "left"), _ml_fields(mx, "right")])
 
 func _write_ap_csv(mn: Dictionary, mx: Dictionary) -> bool:
 	var row := "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f" % [
 		mn.cop.x, mn.cop.y, mn.lw + mn.rw, mx.cop.x, mx.cop.y, mx.lw + mx.rw, mx.cop.y - mn.cop.y
 	]
-	return _append_csv("min_max_dist_ap.csv", AP_CSV_HEADER, row)
+	return _append_csv(SessionPaths.reach_file("ap"), AP_CSV_HEADER, row)
 
 func _append_csv(file_name: String, header: String, row: String) -> bool:
 	SessionPaths.ensure_session()

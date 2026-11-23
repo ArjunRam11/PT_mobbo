@@ -237,6 +237,17 @@ func _build_theme() -> Theme:
 	sep.thickness = 1
 	t.set_stylebox("separator", "HSeparator", sep)
 
+	# Radio/tick marks drawn here so they're visible on the dark background:
+	# grey ring = off, yellow ring + dot = on.
+	var off_icon := _radio_icon(COLOR_MUTED_TEXT, false)
+	var on_icon := _radio_icon(COLOR_YELLOW, true)
+	for name in ["radio_unchecked", "unchecked", "radio_unchecked_disabled", "unchecked_disabled"]:
+		t.set_icon(name, "CheckBox", off_icon)
+	for name in ["radio_checked", "checked", "radio_checked_disabled", "checked_disabled"]:
+		t.set_icon(name, "CheckBox", on_icon)
+	t.set_color("checkbox_checked_color", "CheckBox", Color.WHITE)
+	t.set_color("checkbox_unchecked_color", "CheckBox", Color.WHITE)
+
 	t.set_stylebox("panel", "ItemList", _flat_box(COLOR_BACKGROUND, COLOR_BORDER, 1))
 	t.set_stylebox("focus", "ItemList", _flat_box(Color.TRANSPARENT))
 	t.set_stylebox("selected", "ItemList", _flat_box(Color(COLOR_YELLOW, 0.18)))
@@ -254,6 +265,19 @@ func _build_theme() -> Theme:
 	t.set_font_size("font_size", "TooltipLabel", FONT_SIZE_SMALL)
 
 	return t
+
+## 18 px antialiased ring (+ centre dot when on), for CheckBox/radio icons.
+func _radio_icon(color: Color, on: bool) -> ImageTexture:
+	var n := 18
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	var c := Vector2(n, n) * 0.5
+	for y in n:
+		for x in n:
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(c)
+			var ring := clampf(1.0 - absf(d - 7.0) / 1.0, 0.0, 1.0)   # 2 px ring at r=7
+			var dot := clampf(4.0 - d, 0.0, 1.0) if on else 0.0        # r=3.5 dot
+			img.set_pixel(x, y, Color(color, maxf(ring, dot)))
+	return ImageTexture.create_from_image(img)
 
 ## -- Helpers scenes call when building nodes in code ---------------------------
 

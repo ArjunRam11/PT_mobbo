@@ -59,8 +59,8 @@ static func weight_table(r: Dictionary) -> Array:
 	var wr: Dictionary = r.weight_pct.right
 	return [
 		["Total weight, both boards (kg)", _f(t.mean), _f(t.median), _f(t.sd)],
-		["Left board share (%)", _f(wl.mean, 1), _f(wl.median, 1), _f(wl.sd, 1)],
-		["Right board share (%)", _f(wr.mean, 1), _f(wr.median, 1), _f(wr.sd, 1)],
+		["%s board share (%%)" % names(r)[0], _f(wl.mean, 1), _f(wl.median, 1), _f(wl.sd, 1)],
+		["%s board share (%%)" % names(r)[1], _f(wr.mean, 1), _f(wr.median, 1), _f(wr.sd, 1)],
 	]
 
 static func info_rows(r: Dictionary, meta: Dictionary) -> Array:
@@ -70,20 +70,24 @@ static func info_rows(r: Dictionary, meta: Dictionary) -> Array:
 		["Data file", meta.get("file", "")],
 		["Recording started", r.start_time],
 		["Duration (s)", _f(r.duration_s, 1)],
-		["Rows (left / right board)", "%d / %d" % [r.rows_left, r.rows_right]],
+		["Board layout", "Top / bottom" if r.get("layout", "lr") == "tb" else "Left / right"],
+		["Rows (%s / %s board)" % [names(r)[0].to_lower(), names(r)[1].to_lower()], "%d / %d" % [r.rows_left, r.rows_right]],
 		["Sample rate per board (Hz)", _f(r.rate_hz, 1)],
 	]
 
-const METHOD_NOTES := [
-	"Whole file analysed, regardless of trial timing. COP low-pass filtered (10 Hz, 2nd-order Butterworth, zero-phase)",
-	"before all COP measures; forces and weight share are unfiltered.",
-	"Board COP counted only while that board carries > 1 kg; combined COP only while both boards together carry > 1 kg.",
-	"Combined COP and weight share: one sample per left-board packet, paired with the latest right-board packet.",
-	"Frames: board COP relative to that board's centre; combined COP relative to the left board's centre",
-	"(right board centre at +56.2 cm). x = medial-lateral (+ right), y = anterior-posterior (+ front).",
-	"Path length / velocity: sum of distances between consecutive samples (gaps > 0.25 s skipped) / time spanned.",
-	"95% confidence ellipse: semi-axes = sqrt(5.991 x covariance eigenvalues), area = pi a b. SD = sample SD (n-1).",
-]
+static func method_notes(r: Dictionary) -> Array:
+	var n := names(r)
+	var off := offset(r)
+	return [
+		"Whole file analysed, regardless of trial timing. COP low-pass filtered (10 Hz, 2nd-order Butterworth, zero-phase)",
+		"before all COP measures; forces and weight share are unfiltered.",
+		"Board COP counted only while that board carries > 1 kg; combined COP only while both boards together carry > 1 kg.",
+		"Combined COP and weight share: one sample per %s-board packet, paired with the latest %s-board packet." % [n[0].to_lower(), n[1].to_lower()],
+		"Frames: board COP relative to that board's centre; combined COP relative to the %s board's centre" % n[0].to_lower(),
+		"(%s board centre at x %+.1f, y %+.1f cm). x = medial-lateral (+ right), y = anterior-posterior (+ front)." % [n[1].to_lower(), off.x, off.y],
+		"Path length / velocity: sum of distances between consecutive samples (gaps > 0.25 s skipped) / time spanned.",
+		"95% confidence ellipse: semi-axes = sqrt(5.991 x covariance eigenvalues), area = pi a b. SD = sample SD (n-1).",
+	]
 
 ## -- PDF --------------------------------------------------------------------
 
@@ -105,12 +109,15 @@ static func write_pdf(r: Dictionary, meta: Dictionary, path: String) -> bool:
 
 	y += 8
 	pdf.text(x0, y, "COP path on both boards", 11, true)
-	_legend(pdf, x0 + 200, y)
-	_rig_plot(pdf, r, Vector2(x0, y + 8), Vector2(w, 150))
+	_legend(pdf, x0 + 200, y, r)
+	# Top/bottom boards are nearly square overall: give the plot more height.
+	var rig_h := 230.0 if r.get("layout", "lr") == "tb" else 150.0
+	_rig_plot(pdf, r, Vector2(x0, y + 8), Vector2(w, rig_h))
+	y += rig_h - 150.0
 
 	y += 200
 	pdf.text(x0, y, "Combined COP with 95% confidence ellipse", 11, true)
-	_zoom_plot(pdf, r.series.combined, Vector2(x0, y + 8), 255.0, C_COMBINED)
+	_zoom_plot(pdf, r.series.combined, Vector2(x0, y + 8), 255.0, C_COMBINED, r.get("names", ["left"])[0])
 
 	var tx := x0 + 275
 	pdf.text(tx, y, "Weight distribution", 11, true)
@@ -140,12 +147,12 @@ static func write_pdf(r: Dictionary, meta: Dictionary, path: String) -> bool:
 	# Page 2: full tables + method.
 	pdf.new_page()
 	pdf.text(x0, 52, "COP measures", 13, true)
-	y = _table(pdf, Vector2(x0, 64), ["Measure", "Combined", "Left board", "Right board"],
+	y = _table(pdf, Vector2(x0, 64), ["Measure", "Combined", names(r)[0] + " board", names(r)[1] + " board"],
 		cop_table(r), [190.0, 105.0, 110.0, 110.0])
 	y += 22
 	pdf.text(x0, y, "Forces (whole file): mean / median / SD", 13, true)
 	y = _table(pdf, Vector2(x0, y + 12),
-		["Measure", "L mean", "L median", "L SD", "R mean", "R median", "R SD"],
+		["Measure", names(r)[0][0] + " mean", names(r)[0][0] + " median", names(r)[0][0] + " SD", names(r)[1][0] + " mean", names(r)[1][0] + " median", names(r)[1][0] + " SD"],
 		force_table(r), [160.0, 59.0, 59.0, 59.0, 59.0, 59.0, 60.0])
 	y += 22
 	pdf.text(x0, y, "Weight distribution: mean / median / SD", 13, true)
@@ -153,14 +160,15 @@ static func write_pdf(r: Dictionary, meta: Dictionary, path: String) -> bool:
 		weight_table(r), [190.0, 108.0, 108.0, 109.0])
 	y += 22
 	pdf.text(x0, y, "Method", 11, true)
-	for note in METHOD_NOTES:
+	for note in method_notes(r):
 		y += 12
 		pdf.text(x0, y, note, 7.5, false, C_MUTED)
 	pdf.text(x0, PdfDoc.PAGE_H - 30, "Generated %s by MoBBo" % Time.get_datetime_string_from_system(), 7, false, C_MUTED)
 	return pdf.save(path)
 
-static func _legend(pdf: PdfDoc, x: float, y: float) -> void:
-	var items := [[C_LEFT, "Left board COP"], [C_RIGHT, "Right board COP"], [C_COMBINED, "Combined COP"]]
+static func _legend(pdf: PdfDoc, x: float, y: float, r: Dictionary) -> void:
+	var n := names(r)
+	var items := [[C_LEFT, n[0] + " board COP"], [C_RIGHT, n[1] + " board COP"], [C_COMBINED, "Combined COP"]]
 	for it in items:
 		pdf.line(Vector2(x, y - 3), Vector2(x + 14, y - 3), it[0], 2.0)
 		pdf.text(x + 18, y, it[1], 8)
@@ -216,11 +224,28 @@ static func _map_all(m: Callable, pts: PackedVector2Array) -> PackedVector2Array
 		out.append(m.call(p))
 	return out
 
+## -- Layout of the analysed file (not the current setting) --------------
+
+## ["Left", "Right"] or ["Top", "Bottom"].
+static func names(r: Dictionary) -> Array:
+	var n: Array = r.get("names", ["left", "right"])
+	return [n[0].capitalize(), n[1].capitalize()]
+
+static func offset(r: Dictionary) -> Vector2:
+	return r.get("offset", Vector2(2.0 * BoardData.L_HALF, 0.0))
+
+## [min, max] world corners covering both boards, plus a margin.
+static func world_bounds(off: Vector2, margin: float = 2.0) -> Array:
+	var a := Rect2(-BoardData.L_HALF, -BoardData.B_HALF, 2.0 * BoardData.L_HALF, 2.0 * BoardData.B_HALF)
+	var b := a.merge(Rect2(a.position + off, a.size)).grow(margin)
+	return [b.position, b.end]
+
 static func _rig_plot(pdf: PdfDoc, r: Dictionary, pos: Vector2, size: Vector2) -> void:
 	var L := BoardData.L_HALF
 	var B := BoardData.B_HALF
-	var off: Vector2 = BoardData.right_board_offset
-	var m := _mapper(pos, size, Vector2(-L - 2, -B - 2), Vector2(off.x + L + 2, B + 2))
+	var off := offset(r)
+	var wb := world_bounds(off)
+	var m := _mapper(pos, size, wb[0], wb[1])
 	for centre in [Vector2.ZERO, off]:
 		var tl: Vector2 = m.call(centre + Vector2(-L, B))
 		var br: Vector2 = m.call(centre + Vector2(L, -B))
@@ -240,7 +265,7 @@ static func _rig_plot(pdf: PdfDoc, r: Dictionary, pos: Vector2, size: Vector2) -
 			pdf.polyline(_map_all(m, CopAnalysis.ellipse_points(e)), cols[i], 1.0, true)
 	pdf.text(pos.x, pos.y + size.y + 10, "Front of the boards at the top. Thin line = COP path, thick = 95% ellipse.", 7, false, C_MUTED)
 
-static func _zoom_plot(pdf: PdfDoc, s: Dictionary, pos: Vector2, side: float, color: Color) -> void:
+static func _zoom_plot(pdf: PdfDoc, s: Dictionary, pos: Vector2, side: float, color: Color, origin_board: String = "left") -> void:
 	pdf.rect(pos, Vector2(side, side), Color(0.6, 0.6, 0.6), null, 0.8)
 	if s.n < 3:
 		pdf.text_center(pos.x + side * 0.5, pos.y + side * 0.5, "Not enough loaded samples", 9, false, C_MUTED)
@@ -271,7 +296,7 @@ static func _zoom_plot(pdf: PdfDoc, s: Dictionary, pos: Vector2, side: float, co
 	var c: Vector2 = m.call(centre)
 	pdf.line(c - Vector2(4, 0), c + Vector2(4, 0), Color.BLACK, 1.0)
 	pdf.line(c - Vector2(0, 4), c + Vector2(0, 4), Color.BLACK, 1.0)
-	pdf.text_center(pos.x + side * 0.5 + inner * 0.5, pos.y + side + 12, "ML x (cm, left-board centre = 0)", 7, false, C_MUTED)
+	pdf.text_center(pos.x + side * 0.5 + inner * 0.5, pos.y + side + 12, "ML x (cm, %s-board centre = 0)" % origin_board, 7, false, C_MUTED)
 	pdf.text(pos.x + 2, pos.y + 10, "AP y", 7, false, C_MUTED)
 	pdf.text(pos.x + 2, pos.y + 18, "(cm)", 7, false, C_MUTED)
 
