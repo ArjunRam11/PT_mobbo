@@ -47,13 +47,24 @@ static func analyze_file(path: String) -> Dictionary:
 			f.close()
 			return {"error": "not a MoBBo raw data file (missing '%s' column)" % name}
 	var rows := []
+	var top_bottom := false
 	while not f.eof_reached():
 		var r := f.get_csv_line()
 		if r.size() < header.size() - 1 or r.size() <= col.f4:
 			continue
-		var side := r[col.side].strip_edges()
-		if side != "left" and side != "right":
-			continue
+		# Board 0 = "left" or "top", board 1 = "right" or "bottom" (layout
+		# names written by the logger); internally slots "left"/"right".
+		var name := r[col.side].strip_edges()
+		var side := ""
+		match name:
+			"left", "top":
+				side = "left"
+			"right", "bottom":
+				side = "right"
+			_:
+				continue
+		if name == "top" or name == "bottom":
+			top_bottom = true
 		rows.append({
 			"side": side,
 			"systime": r[col.systime].strip_edges(),
@@ -64,12 +75,53 @@ static func analyze_file(path: String) -> Dictionary:
 	f.close()
 	if rows.is_empty():
 		return {"error": "file has no data rows"}
-	var res := analyze_rows(rows)
+	var off := _recorded_offset(path, top_bottom)
+	var res := analyze_rows(rows, off)
 	res["file"] = path
+	res["layout"] = "tb" if top_bottom else "lr"
+	res["names"] = ["top", "bottom"] if top_bottom else ["left", "right"]
+	res["offset"] = off
 	return res
 
-static func analyze_rows(rows: Array) -> Dictionary:
-	var off: Vector2 = BoardData.right_board_offset
+## Board 1's offset as it was when the file was recorded: from the
+## session's session_info.csv (right_board_offset_cm) when it matches the
+## file's layout, else the default for that layout with no gap.
+static func _recorded_offset(path: String, top_bottom: bool) -> Vector2:
+	var default := Vector2(0.0, -2.0 * BoardData.B_HALF) if top_bottom else Vector2(2.0 * BoardData.L_HALF, 0.0)
+	var dir := path.get_base_dir()
+	for i in 4:
+		var info := dir.path_join("session_info.csv")
+		if FileAccess.file_exists(info):
+			var f := FileAccess.open(info, FileAccess.READ)
+			var off := default
+			var info_tb := false
+			while f != null and not f.eof_reached():
+				var kv := f.get_csv_line()
+				if kv.size() < 2:
+					continue
+				if kv[0] == "layout":
+					info_tb = kv[1] == "top_bottom"
+				elif kv[0] == "right_board_offset_cm":
+					var p := kv[1].split(",")
+					if p.size() == 2:
+						off = Vector2(p[0].to_float(), p[1].to_float())
+			if f != null:
+				f.close()
+			return off if info_tb == top_bottom else default
+		dir = dir.get_base_dir()
+	return default
+
+## Combined COP with an explicit board-1 offset (see BoardData.combined_cop).
+static func _combined(lf: Array, rf: Array, off: Vector2) -> Variant:
+	var w := BoardData.total_weight(lf) + BoardData.total_weight(rf)
+	if w <= 0.0:
+		return null
+	var p := Vector2.ZERO
+	for i in 4:
+		p += lf[i] * BoardData.SENSOR_POS[i] + rf[i] * (BoardData.SENSOR_POS[i] + off)
+	return p / w
+
+static func analyze_rows(rows: Array, off: Vector2 = Vector2(2.0 * BoardData.L_HALF, 0.0)) -> Dictionary:
 	var cop := {"left": [], "right": [], "combined": []}      # [t, Vector2]
 	var forces := {"left": [[], [], [], [], []], "right": [[], [], [], [], []]}  # f1..f4, F
 	var total_w := []
@@ -96,7 +148,7 @@ static func analyze_rows(rows: Array) -> Dictionary:
 			if tw > LOAD_MIN_KG:
 				pct_left.append(lw / tw * 100.0)
 				pct_right.append(rw / tw * 100.0)
-				var c = BoardData.combined_cop(last.left, last.right)
+				var c = _combined(last.left, last.right, off)
 				if c != null:
 					cop.combined.append([row.t, c])
 

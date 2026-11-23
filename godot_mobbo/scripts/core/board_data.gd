@@ -34,11 +34,112 @@ const SENSOR_POS := [
 	Vector2(-L_HALF, -B_HALF),
 ]
 
-## ASSUMPTION (see header) -- update once the real board spacing is known.
+## Board 1's centre relative to board 0's centre (cm) in the combined-COP
+## frame. Set from the layout (MoBBo Setup) by _update_offset(); never
+## assign it directly.
 var right_board_offset: Vector2 = Vector2(2.0 * L_HALF, 0.0)
 
-## Per-board calibration override slots, in case the left/right boards turn
-## out to need different numbers later. null = "use the shared GAIN/OFF".
+## -- Rig layout (MoBBo Setup screen) -------------------------------------
+## "lr" (default): board 0 = LEFT, board 1 = RIGHT, side by side along x;
+##                 combined frame origin = left board centre.
+## "tb":           board 0 = TOP (front), board 1 = BOTTOM (directly behind
+##                 it, along -y); x stays the same, only y is extended;
+##                 combined frame origin = top board centre.
+## The two board slots keep their internal keys everywhere in the code:
+## "left" = board 0 and "right" = board 1. Only names, geometry, the reach
+## files and the analysis change with the layout.
+signal layout_changed
+signal calibration_changed
+var layout := "lr"
+var board_gap_cm := 0.0  # gap between the two boards' edges
+
+func is_top_bottom() -> bool:
+	return layout == "tb"
+
+## "left"/"right" slot -> "left"/"right" or "top"/"bottom".
+func board_name(slot: String) -> String:
+	if layout == "tb":
+		return "top" if slot == "left" else "bottom"
+	return slot
+
+## "Left board" / "Top board" etc.
+func board_title(slot: String) -> String:
+	return board_name(slot).capitalize() + " board"
+
+func set_layout(new_layout: String, gap_cm: float) -> void:
+	layout = "tb" if new_layout == "tb" else "lr"
+	board_gap_cm = maxf(gap_cm, 0.0)
+	_update_offset()
+	save_rig_config()
+	SessionPaths.invalidate_limits()
+	layout_changed.emit()
+
+func _update_offset() -> void:
+	if layout == "tb":
+		right_board_offset = Vector2(0.0, -(2.0 * B_HALF + board_gap_cm))
+	else:
+		right_board_offset = Vector2(2.0 * L_HALF + board_gap_cm, 0.0)
+
+## World rectangle (combined frame, cm) covering both boards.
+func combined_bounds() -> Rect2:
+	var a := Rect2(-L_HALF, -B_HALF, 2.0 * L_HALF, 2.0 * B_HALF)
+	return a.merge(Rect2(a.position + right_board_offset, a.size))
+
+## -- Saved rig config: layout + calibration (per PC) -----------------------
+
+func _config_path() -> String:
+	return SessionPaths.file_path_root.path_join("data/config/rig.cfg")
+
+func _ready() -> void:
+	load_rig_config()
+
+func load_rig_config() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_config_path()) == OK:
+		layout = "tb" if cfg.get_value("layout", "mode", "lr") == "tb" else "lr"
+		board_gap_cm = float(cfg.get_value("layout", "gap_cm", 0.0))
+		left_gain = _valid_gain(cfg.get_value("calibration", "board0_gain", []))
+		right_gain = _valid_gain(cfg.get_value("calibration", "board1_gain", []))
+		calibration_info = str(cfg.get_value("calibration", "info", ""))
+	_update_offset()
+
+func save_rig_config() -> void:
+	DirAccess.make_dir_recursive_absolute(_config_path().get_base_dir())
+	var cfg := ConfigFile.new()
+	cfg.set_value("layout", "mode", layout)
+	cfg.set_value("layout", "gap_cm", board_gap_cm)
+	cfg.set_value("calibration", "board0_gain", left_gain)
+	cfg.set_value("calibration", "board1_gain", right_gain)
+	cfg.set_value("calibration", "info", calibration_info)
+	cfg.save(_config_path())
+
+static func _valid_gain(v: Variant) -> Array:
+	if v is Array and v.size() == 4:
+		for g in v:
+			if not (g is float or g is int) or g == 0:
+				return []
+		return v
+	return []
+
+## Human-readable note on where the calibration came from (date, method).
+var calibration_info := ""
+
+## gains: kg per ADC count for sensors 1-4 ([] = factory default GAIN).
+func set_calibration(slot: String, gains: Array, info: String) -> void:
+	if slot == "left":
+		left_gain = gains.duplicate()
+	else:
+		right_gain = gains.duplicate()
+	calibration_info = info
+	save_rig_config()
+	calibration_changed.emit()
+
+## The gains actually in use for a board slot.
+func gains_for(slot: String) -> Array:
+	return _gain_for(slot).duplicate()
+
+## Per-board calibration override slots (set by the Calibration tab; empty
+## = use the factory GAIN/OFF above).
 var left_gain: Array = []
 var left_off: Array = []
 var right_gain: Array = []
@@ -82,8 +183,9 @@ func board_cop(forces: Array) -> Variant:
 		y += forces[i] * SENSOR_POS[i].y
 	return Vector2(x / w, y / w)
 
-## Combined COP (cm) across both boards, in a frame centered on the LEFT
-## board. Returns null if there's no load on either board.
+## Combined COP (cm) across both boards, in a frame centered on board 0
+## (left board, or top board in the top/bottom layout). Returns null if
+## there's no load on either board.
 func combined_cop(left_forces: Array, right_forces: Array) -> Variant:
 	var total_w := total_weight(left_forces) + total_weight(right_forces)
 	if total_w <= 0.0:
@@ -158,7 +260,7 @@ func log_packet(side: String, adc: Array) -> void:
 	var gx: float = 0.0 if g == null else g.x
 	var gy: float = 0.0 if g == null else g.y
 	_trial_logger.log_data("%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.4f,%s,%.3f,%.3f,%.4f,%d,%d,%d,%d\n" % [
-		side, Time.get_datetime_string_from_system(), Time.get_ticks_msec() - _trial_start_ms,
+		board_name(side), Time.get_datetime_string_from_system(), Time.get_ticks_msec() - _trial_start_ms,
 		forces[0], forces[1], forces[2], forces[3], cx, cy, w, annotation,
 		gx, gy, w_total, adc[0], adc[1], adc[2], adc[3],
 	])

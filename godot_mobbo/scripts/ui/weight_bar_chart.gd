@@ -6,7 +6,9 @@ extends Control
 
 const MIN_Y_MAX := 20.0
 const BAR_COLORS := [UiTheme.COLOR_BLUE, UiTheme.COLOR_GREEN, UiTheme.COLOR_YELLOW]
-const NAMES := ["Left", "Right", "Total"]
+## Board names follow the rig layout (Left/Right or Top/Bottom).
+func _names() -> Array:
+	return [BoardData.board_name("left").capitalize(), BoardData.board_name("right").capitalize(), "Total"]
 
 var _values := [0.0, 0.0, 0.0]
 var _has := [false, false, false]
@@ -65,12 +67,12 @@ func _draw() -> void:
 		draw_string(value_font, Vector2(cx - slot * 0.5, plot.end.y - h - 8), value_text,
 			HORIZONTAL_ALIGNMENT_CENTER, slot, value_size, BAR_COLORS[i] if _has[i] else UiTheme.COLOR_MUTED_TEXT)
 		# Category + share of total under the axis.
-		draw_string(font, Vector2(cx - slot * 0.5, plot.end.y + small + 8), NAMES[i],
+		draw_string(font, Vector2(cx - slot * 0.5, plot.end.y + small + 8), _names()[i],
 			HORIZONTAL_ALIGNMENT_CENTER, slot, small, UiTheme.COLOR_TEXT)
 		var sub := ""
 		if i < 2 and _has[i] and total > 0.5:
 			sub = "%.0f%%" % (v / total * 100.0)
 		elif i == 2:
-			sub = "L + R"
+			sub = "T + B" if BoardData.is_top_bottom() else "L + R"
 		draw_string(font, Vector2(cx - slot * 0.5, plot.end.y + small * 2 + 14), sub,
 			HORIZONTAL_ALIGNMENT_CENTER, slot, small, UiTheme.COLOR_MUTED_TEXT)

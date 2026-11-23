@@ -50,7 +50,7 @@ func _ready() -> void:
 	add_child(_file_dialog)
 
 	# -- Plots
-	var mid := _card("COP path", "Left (blue), right (green), combined (yellow)", true)
+	var mid := _card("COP path", "Board 0 (blue), board 1 (green), combined (yellow)", true)
 	mid.get_parent().size_flags_stretch_ratio = 1.3
 	_rig_plot = CopPlot.new()
 	_rig_plot.mode = "rig"
@@ -199,9 +199,10 @@ func _fill_tables() -> void:
 		info.append([r[0], str(r[1])])
 	_add_table("Recording", [], info, [1.6, 2.4])
 	_add_table("Weight distribution", ["", "Mean", "Median", "SD"], CopReport.weight_table(_result), [2.6, 1, 1, 1])
-	_add_table("COP measures", ["", "Combined", "Left", "Right"], CopReport.cop_table(_result), [2.6, 1.1, 1.1, 1.1])
-	_add_table("Forces (kg)", ["", "L mean", "L med", "L SD", "R mean", "R med", "R SD"], CopReport.force_table(_result), [2.6, 1, 1, 1, 1, 1, 1])
-	var note := UiTheme.make_field_label("Board COP: relative to that board's centre. Combined COP: relative to the left board's centre. COP only while > 1 kg load. COP low-pass filtered at 10 Hz (zero-phase); forces unfiltered.")
+	var n := CopReport.names(_result)
+	_add_table("COP measures", ["", "Combined", n[0], n[1]], CopReport.cop_table(_result), [2.6, 1.1, 1.1, 1.1])
+	_add_table("Forces (kg)", ["", n[0][0] + " mean", n[0][0] + " med", n[0][0] + " SD", n[1][0] + " mean", n[1][0] + " med", n[1][0] + " SD"], CopReport.force_table(_result), [2.6, 1, 1, 1, 1, 1, 1])
+	var note := UiTheme.make_field_label("Board COP: relative to that board's centre. Combined COP: relative to the %s board's centre." % n[0].to_lower() + " COP only while > 1 kg load. COP low-pass filtered at 10 Hz (zero-phase); forces unfiltered.")
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_tables.add_child(note)
 

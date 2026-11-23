@@ -46,8 +46,9 @@ func _mapped(m: Callable, pts: PackedVector2Array) -> PackedVector2Array:
 func _draw_rig() -> void:
 	var L := BoardData.L_HALF
 	var B := BoardData.B_HALF
-	var off: Vector2 = BoardData.right_board_offset
-	var m := _mapper(Rect2(Vector2(10, 10), size - Vector2(20, 20)), Vector2(-L - 2, -B - 2), Vector2(off.x + L + 2, B + 2))
+	var off := CopReport.offset(result)  # layout the file was recorded with
+	var wb := CopReport.world_bounds(off)
+	var m := _mapper(Rect2(Vector2(10, 10), size - Vector2(20, 20)), wb[0], wb[1])
 	var axis := Color(UiTheme.COLOR_MUTED_TEXT, 0.25)
 	for centre in [Vector2.ZERO, off]:
 		var tl: Vector2 = m.call(centre + Vector2(-L, B))

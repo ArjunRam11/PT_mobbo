@@ -118,8 +118,16 @@ func _write_session_info() -> void:
 	f.store_line("trial_duration_s,%d" % trial_duration)
 	f.store_line("computer,%s" % OS.get_name())
 	f.store_line("app,%s" % ProjectSettings.get_setting("application/config/name", "MoBBo"))
+	f.store_line("layout,%s" % ("top_bottom" if BoardData.is_top_bottom() else "left_right"))
+	f.store_line("board0,%s" % BoardData.board_name("left"))
+	f.store_line("board1,%s" % BoardData.board_name("right"))
+	f.store_line("board_gap_cm,%.2f" % BoardData.board_gap_cm)
 	f.store_line("zero_adc,\"%s\"" % ",".join(BoardData.ZERO_ADC.map(func(v): return "%.2f" % v)))
 	f.store_line("slope_counts_per_kg,\"%s\"" % ",".join(BoardData.SLOPE.map(func(v): return "%.2f" % v)))
+	# Gains actually used (kg per ADC count, sensors 1-4) after calibration.
+	f.store_line("board0_gain_kg_per_count,\"%s\"" % ",".join(BoardData.gains_for("left").map(func(v): return "%.12f" % v)))
+	f.store_line("board1_gain_kg_per_count,\"%s\"" % ",".join(BoardData.gains_for("right").map(func(v): return "%.12f" % v)))
+	f.store_line("calibration,\"%s\"" % (BoardData.calibration_info if not BoardData.calibration_info.is_empty() else "factory default"))
 	f.store_line("board_half_lr_cm,%.2f" % BoardData.L_HALF)
 	f.store_line("board_half_fb_cm,%.2f" % BoardData.B_HALF)
 	f.store_line("right_board_offset_cm,\"%.2f,%.2f\"" % [BoardData.right_board_offset.x, BoardData.right_board_offset.y])
@@ -217,9 +225,16 @@ func look_for_existing_user(hosp_no: String) -> bool:
 ## file meant to grow one row per assessment, always using the very first
 ## one ever recorded looks like an oversight, not an intended "baseline"
 ## design. This reads the LAST (most recent) row instead.
+## Reach files are per layout: left/right keeps the original names; the
+## top/bottom layout uses its own "_tb" files, because its combined-COP
+## frame is different and a left/right range would mis-scale the games.
+func reach_file(axis: String) -> String:
+	return "min_max_dist_%s%s.csv" % [axis, "_tb" if BoardData.is_top_bottom() else ""]
+
 func get_ml_limits() -> Dictionary:
-	var fallback := {"left": -BoardData.L_HALF, "right": BoardData.right_board_offset.x + BoardData.L_HALF}
-	var v := _last_row_pair("min_max_dist_ml.csv", "min_gcop_x", "max_gcop_x")
+	var b := BoardData.combined_bounds()
+	var fallback := {"left": b.position.x, "right": b.end.x}
+	var v := _last_row_pair(reach_file("ml"), "min_gcop_x", "max_gcop_x")
 	if v.is_empty():
 		return fallback
 	return {"left": v[0], "right": v[1]}
@@ -228,8 +243,9 @@ func get_ml_limits() -> Dictionary:
 ## in cm, from min_max_dist_ap.csv (written by the assessment scene). Used
 ## by Floppy Bird. Falls back to the boards' physical front-back span.
 func get_ap_limits() -> Dictionary:
-	var fallback := {"back": -BoardData.B_HALF, "front": BoardData.B_HALF}
-	var v := _last_row_pair("min_max_dist_ap.csv", "min_gcop_y", "max_gcop_y")
+	var b := BoardData.combined_bounds()
+	var fallback := {"back": b.position.y, "front": b.end.y}
+	var v := _last_row_pair(reach_file("ap"), "min_gcop_y", "max_gcop_y")
 	if v.is_empty():
 		return fallback
 	return {"back": v[0], "front": v[1]}

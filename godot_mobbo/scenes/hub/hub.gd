@@ -20,6 +20,9 @@ const GAME_ENTRIES := [
 	{"label": "Sit Assessment", "card": "sit_assessment", "row": 1, "scene": "res://scenes/assessment/assessment.tscn"},
 	{"label": "Stepper", "card": "stepper", "row": 1, "scene": ""},
 	# Unity's sensory_assess.cs was an empty stub -- nothing to port yet.
+	{"label": "Sensory Integration Test", "scene": ""},
+	{"label": "MoBBo Setup", "scene": "res://scenes/mobbo_setup/mobbo_setup.tscn"},
+	{"label": "User Info", "scene": ""},
 	{"label": "Sensory Integration", "card": "locked", "row": 1, "scene": ""},
 	{"label": "Board Setup / Test", "card": "locked", "row": 1, "scene": ""},
 	{"label": "User Info", "card": "locked", "row": 1, "scene": ""},
@@ -122,8 +125,10 @@ func _ready() -> void:
 
 func _connection_text() -> String:
 	if SerialLink.left_port != "" or SerialLink.right_port != "":
-		return "Left board: %s   ·   Right board: %s" % [
+		return "%s: %s   ·   %s: %s" % [
+			BoardData.board_title("left"),
 			SerialLink.left_port if SerialLink.left_port != "" else "not found",
+			BoardData.board_title("right"),
 			SerialLink.right_port if SerialLink.right_port != "" else "not found",
 		]
 	return "Boards not connected. Press Auto connect."

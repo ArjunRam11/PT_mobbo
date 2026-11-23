@@ -29,6 +29,7 @@ func _init() -> void:
 	_overlay.draw.connect(_draw_overlay)
 	add_child(_overlay)
 	resized.connect(_layout)
+	BoardData.layout_changed.connect(_layout)
 
 ## Pass null for a COP to hide it.
 func set_data(lf: Array, l_cop: Variant, rf: Array, r_cop: Variant, p_combined: Variant, l_text: String, r_text: String) -> void:
@@ -39,8 +40,25 @@ func set_data(lf: Array, l_cop: Variant, rf: Array, r_cop: Variant, p_combined: 
 	right_weight_text = r_text
 	_overlay.queue_redraw()
 
+const SIDE_LABEL_W := 170.0  # top/bottom layout: names + weights beside the boards
+
 func _layout() -> void:
 	var aspect := BoardData.L_HALF / BoardData.B_HALF
+	if BoardData.is_top_bottom():
+		# Board 0 (top) above board 1 (bottom), labels to their right.
+		var bh := minf((size.y - GAP) * 0.5, (size.x - SIDE_LABEL_W - 16.0) / aspect)
+		bh = maxf(bh, 20.0)
+		var bw := bh * aspect
+		var tx0 := (size.x - (bw + 16.0 + SIDE_LABEL_W)) * 0.5
+		var ty0 := (size.y - (2.0 * bh + GAP)) * 0.5
+		left_view.position = Vector2(tx0, ty0)
+		left_view.size = Vector2(bw, bh)
+		right_view.position = Vector2(tx0, ty0 + bh + GAP)
+		right_view.size = Vector2(bw, bh)
+		_overlay.position = Vector2.ZERO
+		_overlay.size = size
+		_overlay.queue_redraw()
+		return
 	var avail_h := maxf(size.y - TITLE_H - WEIGHT_H, 40.0)
 	var board_w := minf((size.x - GAP) * 0.5, avail_h * aspect)
 	var board_h := board_w / aspect
@@ -58,10 +76,11 @@ func _layout() -> void:
 ## The right board's half uses its own drawn rect, so the on-screen gap
 ## between the boards doesn't shift the marker.
 func _combined_to_px(c: Vector2) -> Vector2:
-	var split := BoardData.right_board_offset.x * 0.5
-	if c.x <= split:
+	var off := BoardData.right_board_offset
+	var on_board0: bool = c.y >= off.y * 0.5 if BoardData.is_top_bottom() else c.x <= off.x * 0.5
+	if on_board0:
 		return left_view.position + left_view.cm_to_px(c)
-	return right_view.position + right_view.cm_to_px(c - BoardData.right_board_offset)
+	return right_view.position + right_view.cm_to_px(c - off)
 
 func _draw_overlay() -> void:
 	var title_font: Font = UiTheme.font_regular
@@ -69,8 +88,18 @@ func _draw_overlay() -> void:
 	var k := clampf(left_view.size.x / BoardView.REFERENCE_WIDTH, 0.8, 2.0)
 	var title_size := int(14 * k)
 	var weight_size := int(18 * k)
-	for pair in [[left_view, "Left board", left_weight_text], [right_view, "Right board", right_weight_text]]:
+	var tb := BoardData.is_top_bottom()
+	for pair in [[left_view, BoardData.board_title("left"), left_weight_text], [right_view, BoardData.board_title("right"), right_weight_text]]:
 		var v: BoardView = pair[0]
+		if tb:
+			# Beside the board: name, then weight.
+			var lx := v.position.x + v.size.x + 16.0
+			var cy := v.position.y + v.size.y * 0.5
+			_overlay.draw_string(title_font, Vector2(lx, cy - 6), pair[1],
+				HORIZONTAL_ALIGNMENT_LEFT, SIDE_LABEL_W, 14, UiTheme.COLOR_MUTED_TEXT)
+			_overlay.draw_string(weight_font, Vector2(lx, cy + 20), pair[2],
+				HORIZONTAL_ALIGNMENT_LEFT, SIDE_LABEL_W, 18, UiTheme.COLOR_TEXT)
+			continue
 		_overlay.draw_string(title_font, Vector2(v.position.x, v.position.y - 10), pair[1],
 			HORIZONTAL_ALIGNMENT_CENTER, v.size.x, title_size, UiTheme.COLOR_MUTED_TEXT)
 		_overlay.draw_string(weight_font, Vector2(v.position.x, v.position.y + v.size.y + 10 + weight_size), pair[2],
